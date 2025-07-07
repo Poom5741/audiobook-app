@@ -1,0 +1,173 @@
+version: '3.8'
+
+services:
+  # Frontend Service - Next.js Audio Player
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: audiobook-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:5001
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      - backend
+    networks:
+      - audiobook-network
+
+  # Backend Service - Express.js API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: audiobook-backend
+    ports:
+      - "5001:5001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=${PORT:-5001}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-here}
+      - BOOKS_PATH=/books
+      - AUDIO_PATH=/audio
+      - TTS_API_URL=http://tts-api:8000
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - books_volume:/books
+      - audio_volume:/audio
+    depends_on:
+      - postgres
+      - redis
+      - tts-api
+    networks:
+      - audiobook-network
+
+  # Crawler Service - Puppeteer Web Scraper
+  crawler:
+    build:
+      context: ./crawler
+      dockerfile: Dockerfile
+    container_name: audiobook-crawler
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - BOOKS_PATH=/books
+      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+    volumes:
+      - ./crawler:/app
+      - /app/node_modules
+      - books_volume:/books
+    depends_on:
+      - postgres
+    networks:
+      - audiobook-network
+
+  # Parser Service - PDF/EPUB Text Extractor
+  parser:
+    build:
+      context: ./parser
+      dockerfile: Dockerfile
+    container_name: audiobook-parser
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - BOOKS_PATH=/books
+      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+    volumes:
+      - ./parser:/app
+      - /app/node_modules
+      - books_volume:/books
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - audiobook-network
+
+  # TTS API Service - Python Bark/Tortoise
+  tts-api:
+    build:
+      context: ./tts-api
+      dockerfile: Dockerfile
+    container_name: audiobook-tts
+    ports:
+      - "8000:8000"
+    environment:
+      - TTS_MODEL=${TTS_MODEL:-bark}
+      - TTS_PORT=${TTS_PORT:-8000}
+      - TTS_DEVICE=${TTS_DEVICE:-cpu}
+      - AUDIO_PATH=/audio
+    volumes:
+      - ./tts-api:/app
+      - audio_volume:/audio
+      - tts_models:/root/.cache
+    networks:
+      - audiobook-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: audiobook-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-audiobook}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-audiobook123}
+      - POSTGRES_DB=${POSTGRES_DB:-audiobook_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - audiobook-network
+
+  # Redis for caching and job queue
+  redis:
+    image: redis:7-alpine
+    container_name: audiobook-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - audiobook-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: audiobook-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+      - audio_volume:/var/www/audio:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - audiobook-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  books_volume:
+    driver: local
+  audio_volume:
+    driver: local
+  tts_models:
+    driver: local
+
+networks:
+  audiobook-network:
+    driver: bridge

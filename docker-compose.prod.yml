@@ -1,0 +1,167 @@
+version: '3.8'
+
+services:
+  # Frontend Service - Next.js Audio Player
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: audiobook-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:5001
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      - backend
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+  # Backend Service - Express.js API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: audiobook-backend
+    ports:
+      - "5001:5001"
+    environment:
+      - NODE_ENV=production
+      - PORT=5001
+      - DATABASE_URL=postgresql://audiobook:audiobook123@postgres:5432/audiobook_db
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-here}
+      - BOOKS_PATH=/books
+      - AUDIO_PATH=/audio
+      - TTS_API_URL=http://tts-api:8000
+    volumes:
+      - books_volume:/books
+      - audio_volume:/audio
+    depends_on:
+      - postgres
+      - redis
+      - tts-api
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+  # Crawler Service - Puppeteer Web Scraper
+  crawler:
+    build:
+      context: ./crawler
+      dockerfile: Dockerfile
+    container_name: audiobook-crawler
+    environment:
+      - NODE_ENV=production
+      - BOOKS_PATH=/books
+      - DATABASE_URL=postgresql://audiobook:audiobook123@postgres:5432/audiobook_db
+    volumes:
+      - books_volume:/books
+    depends_on:
+      - postgres
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+  # Parser Service - PDF/EPUB Text Extractor
+  parser:
+    build:
+      context: ./parser
+      dockerfile: Dockerfile
+    container_name: audiobook-parser
+    environment:
+      - NODE_ENV=production
+      - BOOKS_PATH=/books
+      - DATABASE_URL=postgresql://audiobook:audiobook123@postgres:5432/audiobook_db
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - books_volume:/books
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+  # TTS API Service - Python EmotiVoice
+  tts-api:
+    build:
+      context: ./tts-api
+      dockerfile: Dockerfile
+    container_name: audiobook-tts
+    ports:
+      - "8000:8000"
+    environment:
+      - TTS_PORT=8000
+      - TTS_HOST=0.0.0.0
+      - AUDIO_PATH=/audio
+    volumes:
+      - audio_volume:/audio
+      - tts_models:/root/.cache
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: audiobook-postgres
+    environment:
+      - POSTGRES_USER=audiobook
+      - POSTGRES_PASSWORD=audiobook123
+      - POSTGRES_DB=audiobook_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+  # Redis for caching and job queue
+  redis:
+    image: redis:7-alpine
+    container_name: audiobook-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: audiobook-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - audio_volume:/var/www/audio:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - audiobook-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  books_volume:
+    driver: local
+  audio_volume:
+    driver: local
+  tts_models:
+    driver: local
+
+networks:
+  audiobook-network:
+    driver: bridge

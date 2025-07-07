@@ -1,0 +1,36 @@
+# Claude Code Shortcuts Reference
+
+## Session Management
+/forward-context   → Save current convo/context into a new GH issue for next session.
+/retrospective     → Write a diary of lessons learned; include "Lessons Learned" section.
+/new-session       → Fetch context from the last issue or PR; summarize open issues and tasks; remind about GH Flow & tmux.
+/compact           → Compact the context now for this feature before switching sessions.
+/nnn               → Start working on feature number NNN.
+
+## Development Modes
+/frontend    → Enter "frontend" mode: focus on UI/UX, component design, CSS/TSX snippets, and accessibility.
+/backend     → Enter "backend" mode: focus on API endpoints, database models, business logic, and security.
+
+## Testing & Quality
+/e2e         → Generate end-to-end test scenarios, Cypress/Playwright scripts, and testing matrices.
+/test        → Generate unit tests for the latest code changes (Jest, pytest, etc.).
+/qa          → QA checklist: create bug reports, test plans, and regression matrices.
+
+## Development Tools
+/debug       → Trigger debugging mode: analyze error logs, suggest breakpoints, and propose fixes.
+/lint        → Run or fix linter errors: suggest ESLint/Pylint configurations and auto-fixes.
+/perf        → Performance analysis: suggest profiling commands, identify bottlenecks, and propose optimizations.
+/security    → Security audit: scan for common vulnerabilities, propose mitigations, and output a security report.
+
+## Documentation & Deployment
+/doc         → Create or update documentation: README sections, API docs, or architecture diagrams.
+/deploy      → Deployment mode: generate CI/CD pipeline YAML (GitHub Actions, Jenkins, etc.) and release notes.
+/ux          → UX review: provide usability feedback, user flows, and wireframe suggestions.
+
+## Audiobook Project Specific (from PROJECT CONTEXT)
+/ccc         → Plan architecture of each module
+/backend     → Build Express API: list books, stream audio, trigger TTS (audiobook specific)
+/frontend    → Build React UI: bookshelf, player, progress sync (audiobook specific)
+/deploy      → Dockerfiles + compose stack (audiobook specific)
+/debug       → Logs not working in container or TTS fails (audiobook specific)
+/retrospective → Capture learnings per milestone (audiobook specific)

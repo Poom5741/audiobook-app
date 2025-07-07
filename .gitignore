@@ -1,0 +1,116 @@
+# Environment files
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+*/node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Build outputs
+.next/
+*/build/
+*/dist/
+*/.next/
+*/out/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+nyc_output/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# Audio and book files (user data)
+audio/
+books/
+parser/output/
+
+# Database data
+postgres_data/
+redis_data/
+
+# Model cache
+.cache/
+models/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Test files
+test-results/
+coverage/
+
+# SSL certificates (if using HTTPS)
+ssl/
+*.key
+*.crt
+*.pem
+
+# Backup files
+*.backup
+*.bak
+
+# Local development files
+.local
+local/
+
+# Frontend specific
+.eslintcache
+*.tsbuildinfo
+
+# Python specific
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker volumes
+postgres_data/
+redis_data/
+books_volume/
+audio_volume/
+tts_models/

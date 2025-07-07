@@ -1,0 +1,24 @@
+FROM node:18-slim
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application files
+COPY . .
+
+# Create logs directory
+RUN mkdir -p logs
+
+# Set permissions
+RUN chown -R node:node /app
+
+USER node
+
+EXPOSE 5000
+
+CMD ["node", "src/server.js"]
