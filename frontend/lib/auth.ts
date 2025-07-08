@@ -39,6 +39,17 @@ export interface AuthStatus {
 export const authService = {
   // Login
   async login(username: string, password: string): Promise<LoginResponse> {
+    // If auth is disabled, allow any login
+    if (AUTH_DISABLED) {
+      const mockResponse = {
+        message: 'Login successful (auth disabled)',
+        user: { id: 'guest', username: username, role: 'admin' } as User,
+        token: 'mock-token'
+      };
+      localStorage.setItem('authToken', mockResponse.token);
+      return mockResponse;
+    }
+
     try {
       const response = await authApi.post('/login', { username, password });
       
@@ -50,6 +61,19 @@ export const authService = {
       
       return response.data;
     } catch (error: any) {
+      // If auth service is unreachable, provide fallback login
+      const errorMessage = error.message || '';
+      if (errorMessage.includes('Network Error') || errorMessage.includes('timeout') || error.code === 'ECONNREFUSED') {
+        console.warn('Auth service unavailable, using fallback login');
+        const fallbackResponse = {
+          message: 'Login successful (fallback mode)',
+          user: { id: 'fallback', username: username, role: 'admin' } as User,
+          token: 'fallback-token'
+        };
+        localStorage.setItem('authToken', fallbackResponse.token);
+        return fallbackResponse;
+      }
+
       if (error.response?.status === 429) {
         throw new Error(`Too many login attempts. Please try again in ${error.response.data.retryAfter} seconds.`);
       }
@@ -166,13 +190,13 @@ export const authService = {
     } catch (error) {
       console.error('Auth initialization error:', error);
       
-      // If auth service is unreachable, check if we should allow fallback access
+      // If auth service is unreachable, require manual login
       const errorMessage = (error as any)?.message || '';
       if (errorMessage.includes('Network Error') || errorMessage.includes('timeout')) {
-        console.warn('Auth service unavailable, falling back to no-auth mode');
+        console.warn('Auth service unavailable, login required');
         return { 
-          isAuthenticated: true, 
-          user: { id: 'fallback', username: 'fallback', role: 'admin' } as User, 
+          isAuthenticated: false, 
+          user: null, 
           loading: false 
         };
       }

@@ -28,15 +28,11 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [authStatus, setAuthStatus] = useState<any>(null);
 
-  // Redirect if already authenticated
+  // Only check auth status, don't auto-redirect
   useEffect(() => {
-    if (isAuthenticated()) {
-      router.push('/');
-    }
-
     // Load auth service status
     loadAuthStatus();
-  }, [router]);
+  }, []);
 
   const loadAuthStatus = async () => {
     try {

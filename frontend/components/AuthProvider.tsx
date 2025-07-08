@@ -53,15 +53,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Redirect logic
   useEffect(() => {
     if (isClient && !authStatus.loading) {
+      // Check if user is in fallback mode (guest/fallback users)
+      const isFallbackUser = authStatus.user?.id === 'guest' || authStatus.user?.id === 'fallback';
+      
       if (!authStatus.isAuthenticated && !isPublicRoute) {
         // Redirect to login if not authenticated and not on public route
         router.push('/login');
-      } else if (authStatus.isAuthenticated && pathname === '/login') {
-        // Redirect to home if authenticated and on login page
+      } else if (authStatus.isAuthenticated && pathname === '/login' && !isFallbackUser) {
+        // Redirect to home if properly authenticated and on login page (but not fallback users)
         router.push('/');
       }
     }
-  }, [isClient, authStatus.loading, authStatus.isAuthenticated, pathname, isPublicRoute, router]);
+  }, [isClient, authStatus.loading, authStatus.isAuthenticated, authStatus.user, pathname, isPublicRoute, router]);
 
   const initializeAuth = async () => {
     try {
