@@ -69,6 +69,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setAuthStatus(status);
     } catch (error) {
       console.error('Failed to initialize auth:', error);
+      // If auth service is not available, allow unauthenticated access
       setAuthStatus({
         isAuthenticated: false,
         user: null,
@@ -128,6 +129,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Block access to protected routes (client-side only)
   if (!authStatus.isAuthenticated && !isPublicRoute) {
+    // Try to redirect, but also show a fallback
+    if (isClient) {
+      router.push('/login');
+    }
+    
     return (
       <AuthContext.Provider 
         value={{
@@ -137,7 +143,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
           refreshAuth
         }}
       >
-        {null} {/* Will redirect via useEffect */}
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
+          <div className="text-center">
+            <div className="w-8 h-8 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-4 mx-auto"></div>
+            <p className="text-gray-600 mb-4">Redirecting to login...</p>
+            <button 
+              onClick={() => window.location.href = '/login'}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Go to Login
+            </button>
+          </div>
+        </div>
       </AuthContext.Provider>
     );
   }

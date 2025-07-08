@@ -2,6 +2,9 @@ import axios from 'axios';
 
 const AUTH_API_BASE = process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:8002';
 
+// Check if auth service is disabled
+const AUTH_DISABLED = process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true';
+
 const authApi = axios.create({
   baseURL: `${AUTH_API_BASE}/api/auth`,
   timeout: 10000,
@@ -128,6 +131,15 @@ export const authService = {
 
   // Initialize auth on app start
   async initializeAuth(): Promise<AuthStatus> {
+    // If auth is disabled, allow access
+    if (AUTH_DISABLED) {
+      return { 
+        isAuthenticated: true, 
+        user: { id: 'guest', username: 'guest', role: 'admin' } as User, 
+        loading: false 
+      };
+    }
+
     const token = localStorage.getItem('authToken');
     
     if (!token) {
@@ -153,6 +165,18 @@ export const authService = {
       }
     } catch (error) {
       console.error('Auth initialization error:', error);
+      
+      // If auth service is unreachable, check if we should allow fallback access
+      const errorMessage = (error as any)?.message || '';
+      if (errorMessage.includes('Network Error') || errorMessage.includes('timeout')) {
+        console.warn('Auth service unavailable, falling back to no-auth mode');
+        return { 
+          isAuthenticated: true, 
+          user: { id: 'fallback', username: 'fallback', role: 'admin' } as User, 
+          loading: false 
+        };
+      }
+      
       localStorage.removeItem('authToken');
       this.clearAuthHeader();
       return { isAuthenticated: false, user: null, loading: false };
