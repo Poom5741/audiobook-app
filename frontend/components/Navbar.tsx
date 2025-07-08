@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -27,7 +27,27 @@ const navigation = [
 
 export function Navbar() {
   const pathname = usePathname()
-  const { user, logout, isAuthenticated } = useAuth()
+  const [isClient, setIsClient] = useState(false)
+  
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
+  
+  // Use optional chaining and provide defaults for SSR
+  let user = null
+  let logout = async () => {}
+  let isAuthenticated = false
+  
+  if (isClient) {
+    try {
+      const auth = useAuth()
+      user = auth.user
+      logout = auth.logout
+      isAuthenticated = auth.isAuthenticated
+    } catch (error) {
+      // Auth context not available
+    }
+  }
   
   const handleLogout = async () => {
     try {

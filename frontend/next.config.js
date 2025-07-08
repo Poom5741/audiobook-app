@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  trailingSlash: true,
+  experimental: {
+    appDir: true,
+  },
   async rewrites() {
     return [
       {

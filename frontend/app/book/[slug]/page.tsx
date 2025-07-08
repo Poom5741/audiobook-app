@@ -44,7 +44,7 @@ export default function BookPage() {
       // Load progress and set current chapter
       const progress = progressStorage.getProgress(bookSlug);
       if (progress && progress.currentChapter) {
-        setCurrentChapter(progress.currentChapter);
+        setCurrentChapter(progress.currentChapter.toString());
       } else if (chaptersData.length > 0) {
         // Start with first chapter if no progress
         setCurrentChapter(chaptersData[0].chapter_number.toString());

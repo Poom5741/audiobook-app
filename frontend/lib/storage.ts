@@ -1,265 +1,263 @@
-// Types for localStorage data
-export interface PlaybackPosition {
-  bookSlug: string;
-  chapter: string;
-  currentTime: number;
-  duration: number;
-  lastPlayed: number; // timestamp
-}
+// Local storage utilities for managing book progress
 
 export interface BookProgress {
   bookSlug: string;
-  currentChapter: string;
+  currentChapter: number;
+  completedChapters: number[];
+  lastPosition?: number;
+  lastAccessed: string;
   totalChapters: number;
-  completedChapters: string[];
-  lastAccessed: number;
 }
 
-const STORAGE_KEYS = {
-  PLAYBACK_POSITION: 'audiobook_playback_position',
-  BOOK_PROGRESS: 'audiobook_book_progress',
-  VOLUME: 'audiobook_volume',
-  PLAYBACK_RATE: 'audiobook_playback_rate',
-} as const;
+const PROGRESS_KEY = 'audiobook_progress';
 
-// Playback position management
-export const playbackStorage = {
-  // Save current playback position
-  savePosition(bookSlug: string, chapter: string, currentTime: number, duration: number): void {
+export const progressStorage = {
+  // Get progress for a specific book
+  getProgress(bookSlug: string): BookProgress | null {
+    if (typeof window === 'undefined') return null;
+    
     try {
-      const position: PlaybackPosition = {
-        bookSlug,
-        chapter,
-        currentTime,
-        duration,
-        lastPlayed: Date.now(),
-      };
-      
-      localStorage.setItem(
-        `${STORAGE_KEYS.PLAYBACK_POSITION}_${bookSlug}_${chapter}`,
-        JSON.stringify(position)
-      );
+      const allProgress = this.getAllProgress();
+      return allProgress.find(p => p.bookSlug === bookSlug) || null;
     } catch (error) {
-      console.warn('Failed to save playback position:', error);
-    }
-  },
-
-  // Get saved playback position
-  getPosition(bookSlug: string, chapter: string): PlaybackPosition | null {
-    try {
-      const data = localStorage.getItem(`${STORAGE_KEYS.PLAYBACK_POSITION}_${bookSlug}_${chapter}`);
-      return data ? JSON.parse(data) : null;
-    } catch (error) {
-      console.warn('Failed to get playback position:', error);
+      console.error('Error getting book progress:', error);
       return null;
     }
   },
 
-  // Clear position for specific chapter
-  clearPosition(bookSlug: string, chapter: string): void {
+  // Get all book progress
+  getAllProgress(): BookProgress[] {
+    if (typeof window === 'undefined') return [];
+    
     try {
-      localStorage.removeItem(`${STORAGE_KEYS.PLAYBACK_POSITION}_${bookSlug}_${chapter}`);
+      const stored = localStorage.getItem(PROGRESS_KEY);
+      return stored ? JSON.parse(stored) : [];
     } catch (error) {
-      console.warn('Failed to clear playback position:', error);
-    }
-  },
-
-  // Get all positions for a book
-  getBookPositions(bookSlug: string): PlaybackPosition[] {
-    try {
-      const positions: PlaybackPosition[] = [];
-      const keyPrefix = `${STORAGE_KEYS.PLAYBACK_POSITION}_${bookSlug}_`;
-      
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(keyPrefix)) {
-          const data = localStorage.getItem(key);
-          if (data) {
-            positions.push(JSON.parse(data));
-          }
-        }
-      }
-      
-      return positions.sort((a, b) => b.lastPlayed - a.lastPlayed);
-    } catch (error) {
-      console.warn('Failed to get book positions:', error);
+      console.error('Error getting all progress:', error);
       return [];
     }
   },
-};
 
-// Book progress management
-export const progressStorage = {
-  // Save book progress
+  // Save or update progress for a book
   saveProgress(progress: BookProgress): void {
+    if (typeof window === 'undefined') return;
+    
     try {
-      localStorage.setItem(
-        `${STORAGE_KEYS.BOOK_PROGRESS}_${progress.bookSlug}`,
-        JSON.stringify(progress)
-      );
-    } catch (error) {
-      console.warn('Failed to save book progress:', error);
-    }
-  },
-
-  // Get book progress
-  getProgress(bookSlug: string): BookProgress | null {
-    try {
-      const data = localStorage.getItem(`${STORAGE_KEYS.BOOK_PROGRESS}_${bookSlug}`);
-      return data ? JSON.parse(data) : null;
-    } catch (error) {
-      console.warn('Failed to get book progress:', error);
-      return null;
-    }
-  },
-
-  // Mark chapter as completed
-  markChapterCompleted(bookSlug: string, chapter: string, totalChapters: number): void {
-    try {
-      const existing = this.getProgress(bookSlug) || {
-        bookSlug,
-        currentChapter: chapter,
-        totalChapters,
-        completedChapters: [],
-        lastAccessed: Date.now(),
-      };
-
-      if (!existing.completedChapters.includes(chapter)) {
-        existing.completedChapters.push(chapter);
+      const allProgress = this.getAllProgress();
+      const index = allProgress.findIndex(p => p.bookSlug === progress.bookSlug);
+      
+      if (index >= 0) {
+        allProgress[index] = progress;
+      } else {
+        allProgress.push(progress);
       }
       
-      existing.lastAccessed = Date.now();
-      this.saveProgress(existing);
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify(allProgress));
     } catch (error) {
-      console.warn('Failed to mark chapter completed:', error);
+      console.error('Error saving progress:', error);
+    }
+  },
+
+  // Mark a chapter as completed
+  markChapterCompleted(bookSlug: string, chapterNumber: number): void {
+    const progress = this.getProgress(bookSlug);
+    
+    if (progress) {
+      if (!progress.completedChapters.includes(chapterNumber)) {
+        progress.completedChapters.push(chapterNumber);
+        progress.completedChapters.sort((a, b) => a - b);
+      }
+      progress.lastAccessed = new Date().toISOString();
+      this.saveProgress(progress);
     }
   },
 
   // Update current chapter
-  updateCurrentChapter(bookSlug: string, chapter: string, totalChapters: number): void {
-    try {
-      const existing = this.getProgress(bookSlug) || {
+  updateCurrentChapter(bookSlug: string, chapterNumber: number): void {
+    const progress = this.getProgress(bookSlug);
+    
+    if (progress) {
+      progress.currentChapter = chapterNumber;
+      progress.lastAccessed = new Date().toISOString();
+      this.saveProgress(progress);
+    } else {
+      // Create new progress entry
+      this.saveProgress({
         bookSlug,
-        currentChapter: chapter,
-        totalChapters,
+        currentChapter: chapterNumber,
         completedChapters: [],
-        lastAccessed: Date.now(),
+        lastAccessed: new Date().toISOString(),
+        totalChapters: 1 // Will be updated when book loads
+      });
+    }
+  },
+
+  // Clear progress for a book
+  clearProgress(bookSlug: string): void {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const allProgress = this.getAllProgress();
+      const filtered = allProgress.filter(p => p.bookSlug !== bookSlug);
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify(filtered));
+    } catch (error) {
+      console.error('Error clearing progress:', error);
+    }
+  },
+
+  // Clear all progress
+  clearAllProgress(): void {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      localStorage.removeItem(PROGRESS_KEY);
+    } catch (error) {
+      console.error('Error clearing all progress:', error);
+    }
+  }
+};
+
+// Playback storage utilities
+export interface PlaybackPosition {
+  bookSlug: string;
+  chapter: number;
+  position: number;
+  timestamp: string;
+}
+
+const PLAYBACK_KEY = 'audiobook_playback';
+
+export const playbackStorage = {
+  // Save playback position
+  savePosition(bookSlug: string, chapter: number, position: number): void {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const positions = this.getAllPositions();
+      const index = positions.findIndex(p => p.bookSlug === bookSlug && p.chapter === chapter);
+      
+      const newPosition: PlaybackPosition = {
+        bookSlug,
+        chapter,
+        position,
+        timestamp: new Date().toISOString()
       };
-
-      existing.currentChapter = chapter;
-      existing.lastAccessed = Date.now();
-      this.saveProgress(existing);
-    } catch (error) {
-      console.warn('Failed to update current chapter:', error);
-    }
-  },
-
-  // Get all book progress (for recent books)
-  getAllProgress(): BookProgress[] {
-    try {
-      const progress: BookProgress[] = [];
-      const keyPrefix = `${STORAGE_KEYS.BOOK_PROGRESS}_`;
       
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(keyPrefix)) {
-          const data = localStorage.getItem(key);
-          if (data) {
-            progress.push(JSON.parse(data));
-          }
-        }
+      if (index >= 0) {
+        positions[index] = newPosition;
+      } else {
+        positions.push(newPosition);
       }
       
-      return progress.sort((a, b) => b.lastAccessed - a.lastAccessed);
+      localStorage.setItem(PLAYBACK_KEY, JSON.stringify(positions));
     } catch (error) {
-      console.warn('Failed to get all progress:', error);
-      return [];
-    }
-  },
-};
-
-// Audio settings
-export const settingsStorage = {
-  // Volume (0.0 - 1.0)
-  saveVolume(volume: number): void {
-    try {
-      localStorage.setItem(STORAGE_KEYS.VOLUME, volume.toString());
-    } catch (error) {
-      console.warn('Failed to save volume:', error);
+      console.error('Error saving playback position:', error);
     }
   },
 
-  getVolume(): number {
+  // Get playback position
+  getPosition(bookSlug: string, chapter: number): number {
+    if (typeof window === 'undefined') return 0;
+    
     try {
-      const volume = localStorage.getItem(STORAGE_KEYS.VOLUME);
-      return volume ? parseFloat(volume) : 1.0;
+      const positions = this.getAllPositions();
+      const position = positions.find(p => p.bookSlug === bookSlug && p.chapter === chapter);
+      return position?.position || 0;
     } catch (error) {
-      console.warn('Failed to get volume:', error);
-      return 1.0;
-    }
-  },
-
-  // Playback rate (0.5 - 2.0)
-  savePlaybackRate(rate: number): void {
-    try {
-      localStorage.setItem(STORAGE_KEYS.PLAYBACK_RATE, rate.toString());
-    } catch (error) {
-      console.warn('Failed to save playback rate:', error);
-    }
-  },
-
-  getPlaybackRate(): number {
-    try {
-      const rate = localStorage.getItem(STORAGE_KEYS.PLAYBACK_RATE);
-      return rate ? parseFloat(rate) : 1.0;
-    } catch (error) {
-      console.warn('Failed to get playback rate:', error);
-      return 1.0;
-    }
-  },
-};
-
-// Utility functions
-export const storageUtils = {
-  // Clear all audiobook data
-  clearAll(): void {
-    try {
-      const keys = Object.values(STORAGE_KEYS);
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && keys.some(storageKey => key.startsWith(storageKey))) {
-          localStorage.removeItem(key);
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to clear storage:', error);
-    }
-  },
-
-  // Get storage size usage
-  getStorageSize(): number {
-    try {
-      let total = 0;
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key) {
-          const value = localStorage.getItem(key);
-          if (value) {
-            total += key.length + value.length;
-          }
-        }
-      }
-      return total;
-    } catch (error) {
-      console.warn('Failed to calculate storage size:', error);
+      console.error('Error getting playback position:', error);
       return 0;
     }
   },
+
+  // Get all positions
+  getAllPositions(): PlaybackPosition[] {
+    if (typeof window === 'undefined') return [];
+    
+    try {
+      const stored = localStorage.getItem(PLAYBACK_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+      console.error('Error getting all playback positions:', error);
+      return [];
+    }
+  },
+
+  // Clear position for a book
+  clearBookPositions(bookSlug: string): void {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const positions = this.getAllPositions();
+      const filtered = positions.filter(p => p.bookSlug !== bookSlug);
+      localStorage.setItem(PLAYBACK_KEY, JSON.stringify(filtered));
+    } catch (error) {
+      console.error('Error clearing book positions:', error);
+    }
+  }
 };
 
-export default {
-  playbackStorage,
-  progressStorage,
-  settingsStorage,
-  storageUtils,
+// Settings storage utilities
+export interface AudioSettings {
+  playbackSpeed: number;
+  volume: number;
+  autoPlay: boolean;
+  continuousPlay: boolean;
+}
+
+const SETTINGS_KEY = 'audiobook_settings';
+
+export const settingsStorage = {
+  // Get settings
+  getSettings(): AudioSettings {
+    if (typeof window === 'undefined') {
+      return {
+        playbackSpeed: 1.0,
+        volume: 1.0,
+        autoPlay: true,
+        continuousPlay: true
+      };
+    }
+    
+    try {
+      const stored = localStorage.getItem(SETTINGS_KEY);
+      return stored ? JSON.parse(stored) : {
+        playbackSpeed: 1.0,
+        volume: 1.0,
+        autoPlay: true,
+        continuousPlay: true
+      };
+    } catch (error) {
+      console.error('Error getting settings:', error);
+      return {
+        playbackSpeed: 1.0,
+        volume: 1.0,
+        autoPlay: true,
+        continuousPlay: true
+      };
+    }
+  },
+
+  // Save settings
+  saveSettings(settings: Partial<AudioSettings>): void {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const currentSettings = this.getSettings();
+      const updated = { ...currentSettings, ...settings };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+    } catch (error) {
+      console.error('Error saving settings:', error);
+    }
+  },
+
+  // Reset settings
+  resetSettings(): void {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      localStorage.removeItem(SETTINGS_KEY);
+    } catch (error) {
+      console.error('Error resetting settings:', error);
+    }
+  }
 };

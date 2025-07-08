@@ -10,17 +10,14 @@ interface AuthContextType extends AuthStatus {
   refreshAuth: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({
-  isAuthenticated: false,
-  user: null,
-  loading: true,
-  login: async () => {},
-  logout: async () => {},
-  refreshAuth: async () => {}
-});
+const AuthContext = createContext<AuthContextType | null>(null);
 
 export function useAuth() {
-  return useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }
 
 interface AuthProviderProps {
@@ -28,6 +25,7 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const [isClient, setIsClient] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const [authStatus, setAuthStatus] = useState<AuthStatus>({
@@ -36,18 +34,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     loading: true
   });
 
+  // Check if we're on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   // Public routes that don't require authentication
   const publicRoutes = ['/login'];
   const isPublicRoute = publicRoutes.includes(pathname);
 
   // Initialize auth on mount
   useEffect(() => {
-    initializeAuth();
-  }, []);
+    if (isClient) {
+      initializeAuth();
+    }
+  }, [isClient]);
 
   // Redirect logic
   useEffect(() => {
-    if (!authStatus.loading) {
+    if (isClient && !authStatus.loading) {
       if (!authStatus.isAuthenticated && !isPublicRoute) {
         // Redirect to login if not authenticated and not on public route
         router.push('/login');
@@ -56,7 +61,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         router.push('/');
       }
     }
-  }, [authStatus.loading, authStatus.isAuthenticated, pathname, isPublicRoute, router]);
+  }, [isClient, authStatus.loading, authStatus.isAuthenticated, pathname, isPublicRoute, router]);
 
   const initializeAuth = async () => {
     try {
@@ -98,21 +103,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await initializeAuth();
   };
 
-  // Show loading screen while checking auth
-  if (authStatus.loading) {
+  // During SSR or client loading, show children directly
+  if (!isClient || authStatus.loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4"></div>
-          <p className="text-muted-foreground">Checking authentication...</p>
-        </div>
-      </div>
+      <AuthContext.Provider 
+        value={{
+          ...authStatus,
+          login,
+          logout,
+          refreshAuth
+        }}
+      >
+        {!isClient ? children : (
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4"></div>
+              <p className="text-muted-foreground">Checking authentication...</p>
+            </div>
+          </div>
+        )}
+      </AuthContext.Provider>
     );
   }
 
-  // Block access to protected routes
+  // Block access to protected routes (client-side only)
   if (!authStatus.isAuthenticated && !isPublicRoute) {
-    return null; // Will redirect via useEffect
+    return (
+      <AuthContext.Provider 
+        value={{
+          ...authStatus,
+          login,
+          logout,
+          refreshAuth
+        }}
+      >
+        {null} {/* Will redirect via useEffect */}
+      </AuthContext.Provider>
+    );
   }
 
   return (

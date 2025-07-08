@@ -72,8 +72,9 @@ export default function AudioPlayer({
   }, [isPlaying, currentTime, duration]);
 
   const loadAudioSettings = () => {
-    setVolume(settingsStorage.getVolume());
-    setPlaybackRate(settingsStorage.getPlaybackRate());
+    const settings = settingsStorage.getSettings();
+    setVolume(settings.volume);
+    setPlaybackRate(settings.playbackSpeed);
   };
 
   const loadAudioFile = async () => {
@@ -88,7 +89,7 @@ export default function AudioPlayer({
       }
       
       // Load saved position
-      const savedPosition = playbackStorage.getPosition(bookSlug, chapter);
+      const savedPosition = playbackStorage.getPosition(bookSlug, parseInt(chapter));
       
       const audio = audioRef.current;
       if (audio) {
@@ -98,9 +99,9 @@ export default function AudioPlayer({
           setDuration(audio.duration);
           
           // Restore saved position
-          if (savedPosition && savedPosition.currentTime > 0) {
-            audio.currentTime = savedPosition.currentTime;
-            setCurrentTime(savedPosition.currentTime);
+          if (savedPosition > 0) {
+            audio.currentTime = savedPosition;
+            setCurrentTime(savedPosition);
           }
           
           setLoading(false);
@@ -127,16 +128,16 @@ export default function AudioPlayer({
 
   const savePlaybackPosition = () => {
     if (currentTime > 0 && duration > 0) {
-      playbackStorage.savePosition(bookSlug, chapter, currentTime, duration);
+      playbackStorage.savePosition(bookSlug, parseInt(chapter), currentTime);
     }
   };
 
   const handleChapterComplete = () => {
     // Mark chapter as completed
-    progressStorage.markChapterCompleted(bookSlug, chapter, totalChapters);
+    progressStorage.markChapterCompleted(bookSlug, parseInt(chapter));
     
-    // Clear saved position
-    playbackStorage.clearPosition(bookSlug, chapter);
+    // Clear saved position for this book
+    playbackStorage.clearBookPositions(bookSlug);
     
     // Notify parent component
     if (onChapterComplete) {
@@ -159,7 +160,7 @@ export default function AudioPlayer({
       setIsPlaying(true);
       
       // Update current chapter in progress
-      progressStorage.updateCurrentChapter(bookSlug, chapter, totalChapters);
+      progressStorage.updateCurrentChapter(bookSlug, parseInt(chapter));
     }
   };
 
@@ -176,12 +177,12 @@ export default function AudioPlayer({
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value);
     setVolume(newVolume);
-    settingsStorage.saveVolume(newVolume);
+    settingsStorage.saveSettings({ volume: newVolume });
   };
 
   const handlePlaybackRateChange = (rate: number) => {
     setPlaybackRate(rate);
-    settingsStorage.savePlaybackRate(rate);
+    settingsStorage.saveSettings({ playbackSpeed: rate });
   };
 
   const skip = (seconds: number) => {
