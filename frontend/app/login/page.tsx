@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { authService, isAuthenticated } from '@/lib/auth';
+import { useAuth } from '@/components/AuthProvider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -12,12 +12,12 @@ import {
   Eye, 
   EyeOff,
   Shield,
-  AlertCircle,
-  CheckCircle
+  AlertCircle
 } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login } = useAuth();
   
   const [formData, setFormData] = useState({
     username: '',
@@ -26,22 +26,6 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [authStatus, setAuthStatus] = useState<any>(null);
-
-  // Only check auth status, don't auto-redirect
-  useEffect(() => {
-    // Load auth service status
-    loadAuthStatus();
-  }, []);
-
-  const loadAuthStatus = async () => {
-    try {
-      const status = await authService.getStatus();
-      setAuthStatus(status);
-    } catch (error) {
-      console.error('Failed to load auth status:', error);
-    }
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -66,12 +50,12 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const response = await authService.login(formData.username, formData.password);
+      await login(formData.username, formData.password);
       
       // Redirect to home page on successful login
       router.push('/');
     } catch (error: any) {
-      setError(error.message);
+      setError(error.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -93,43 +77,16 @@ export default function LoginPage() {
             🎵 Audiobook App
           </h1>
           <p className="text-gray-600">
-            Admin Access Required
+            Welcome! Please sign in to continue
           </p>
         </div>
-
-        {/* Auth Status */}
-        {authStatus && (
-          <Card className="mb-6">
-            <CardContent className="pt-4">
-              <div className="flex items-center space-x-2 text-sm">
-                {authStatus.serviceStatus === 'active' ? (
-                  <>
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    <span className="text-green-700">Authentication service active</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertCircle className="h-4 w-4 text-red-500" />
-                    <span className="text-red-700">Authentication service unavailable</span>
-                  </>
-                )}
-              </div>
-              {authStatus.adminConfigured && (
-                <div className="flex items-center space-x-2 text-sm mt-1">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span className="text-green-700">Admin account configured</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
 
         {/* Login Form */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Lock className="h-5 w-5" />
-              <span>Admin Login</span>
+              <span>Sign In</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -143,7 +100,7 @@ export default function LoginPage() {
                   <Input
                     type="text"
                     name="username"
-                    placeholder="Enter admin username"
+                    placeholder="Enter your username"
                     value={formData.username}
                     onChange={handleInputChange}
                     className="pl-10"
@@ -163,7 +120,7 @@ export default function LoginPage() {
                   <Input
                     type={showPassword ? 'text' : 'password'}
                     name="password"
-                    placeholder="Enter admin password"
+                    placeholder="Enter your password"
                     value={formData.password}
                     onChange={handleInputChange}
                     className="pl-10 pr-10"
@@ -217,12 +174,12 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
-        {/* Security Notice */}
+        {/* Info Notice */}
         <div className="mt-6 text-center">
           <p className="text-xs text-gray-500">
-            This is a private audiobook management system.
+            This is a personal audiobook management system.
             <br />
-            Unauthorized access is prohibited.
+            Enter any username and password to continue.
           </p>
         </div>
       </div>
