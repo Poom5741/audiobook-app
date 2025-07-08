@@ -13,7 +13,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     });
   };
 
-  const logout = () => {
+  const logout = async () => {
     // Mock logout
     setAuthStatus({
       isAuthenticated: false,
