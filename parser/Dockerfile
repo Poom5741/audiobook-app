@@ -11,11 +11,9 @@ RUN npm ci --omit=dev --prefer-offline && npm cache clean --force
 # Copy application files
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p output temp-uploads
-
-# Set permissions
-RUN chown -R node:node /app
+# Create necessary directories and set permissions
+RUN mkdir -p output temp-uploads && \
+    chown -R node:node /app
 
 USER node
 
