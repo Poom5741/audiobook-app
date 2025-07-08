@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field
 import uvicorn
 from dotenv import load_dotenv
 
-from emotivoice_engine import EmotiVoiceEngine
-from audio_utils import AudioProcessor
+from simple_tts_engine import SimpleTTSEngine
+from simple_audio_utils import AudioProcessor
 from file_manager import FileManager
 
 # Load environment variables
@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="EmotiVoice TTS API",
-    description="Text-to-Speech microservice using EmotiVoice for audiobook generation",
+    title="SimpleTTS API",
+    description="Text-to-Speech microservice using espeak for audiobook generation",
     version="1.0.0"
 )
 
 # Global instances
-tts_engine: Optional[EmotiVoiceEngine] = None
+tts_engine: Optional[SimpleTTSEngine] = None
 audio_processor: Optional[AudioProcessor] = None
 file_manager: Optional[FileManager] = None
 
@@ -81,13 +81,13 @@ async def startup_event():
         
         file_manager = FileManager(audio_path)
         audio_processor = AudioProcessor()
-        tts_engine = EmotiVoiceEngine()
+        tts_engine = SimpleTTSEngine()
         
-        # Load EmotiVoice models
-        logger.info("Loading EmotiVoice models... This may take a few minutes on first run.")
-        await tts_engine.load_models()
+        # Initialize TTS engine
+        logger.info("Initializing SimpleTTS engine...")
+        await tts_engine.initialize()
         
-        logger.info("EmotiVoice TTS microservice started successfully")
+        logger.info("SimpleTTS microservice started successfully")
         
     except Exception as e:
         logger.error(f"Failed to start TTS service: {e}")
@@ -97,7 +97,7 @@ async def startup_event():
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info("Shutting down EmotiVoice TTS microservice...")
+    logger.info("Shutting down SimpleTTS microservice...")
     
     if tts_engine:
         await tts_engine.cleanup()
