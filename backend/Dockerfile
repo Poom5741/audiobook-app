@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install --omit=dev
+RUN npm ci --omit=dev --prefer-offline && npm cache clean --force
 
 # Copy application files
 COPY . .
