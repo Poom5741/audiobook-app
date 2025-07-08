@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for EmotiVoice TTS API
-FROM python:3.10-slim as base
+FROM python:3.10-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -47,13 +47,13 @@ RUN mkdir -p /audio && \
 
 # Download EmotiVoice models (optional - they'll be downloaded on first use)
 USER tts
-RUN python -c "
-try:
-    import torch
-    print('PyTorch installed successfully')
-    print(f'CUDA available: {torch.cuda.is_available()}')
-except Exception as e:
-    print(f'PyTorch check failed: {e}')
+RUN python -c "\
+try:\
+    import torch;\
+    print('PyTorch installed successfully');\
+    print(f'CUDA available: {torch.cuda.is_available()}');\
+except Exception as e:\
+    print(f'PyTorch check failed: {e}');\
 " || true
 
 # Switch back to root for final setup
