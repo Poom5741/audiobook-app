@@ -90,3 +90,8 @@ class SimpleTTSEngine:
     def get_available_emotions(self) -> list:
         """Get list of available emotions."""
         return ["neutral", "default"]
+        
+    @property
+    def is_loaded(self) -> bool:
+        """Check if TTS engine is loaded and ready."""
+        return self.initialized
