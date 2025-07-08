@@ -69,7 +69,7 @@ export interface DownloadJob {
 
 export interface PipelineJob {
   id: string;
-  status: 'pending' | 'searching' | 'downloading' | 'parsing' | 'generating' | 'completed' | 'failed';
+  status: 'pending' | 'searching' | 'downloading' | 'parsing' | 'summarizing' | 'generating' | 'completed' | 'failed';
   searchQuery: string;
   currentStep: string;
   progress: number;
@@ -79,6 +79,12 @@ export interface PipelineJob {
   completedSteps: number;
   error?: string;
   created_at: string;
+  steps?: {
+    name: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'failed';
+    progress: number;
+    message?: string;
+  }[];
 }
 
 export interface AutoDownloadConfig {
@@ -214,7 +220,7 @@ export const pipelineApi = {
     } = {}
   ): Promise<string | null> {
     try {
-      const response = await axios.post('http://localhost:3002/api/pipeline/create-audiobook', {
+      const response = await axios.post('http://localhost:3001/api/pipeline/create-audiobook', {
         searchQuery, 
         format, 
         maxBooks,
@@ -236,7 +242,7 @@ export const pipelineApi = {
     summaryStyle?: 'concise' | 'detailed' | 'bullets' | 'key-points';
   }): Promise<string | null> {
     try {
-      const response = await axios.post('http://localhost:3002/api/pipeline/create-from-link', options);
+      const response = await axios.post('http://localhost:3001/api/pipeline/create-from-link', options);
       return response.data.jobId || null;
     } catch (error) {
       console.error('Failed to create audiobook from direct link:', error);
@@ -246,7 +252,7 @@ export const pipelineApi = {
 
   async getPipelineJobs(): Promise<PipelineJob[]> {
     try {
-      const response = await axios.get('http://localhost:3002/api/pipeline/jobs');
+      const response = await axios.get('http://localhost:3001/api/pipeline/jobs');
       return response.data.jobs || [];
     } catch (error) {
       console.error('Failed to get pipeline jobs:', error);
@@ -256,7 +262,7 @@ export const pipelineApi = {
 
   async getPipelineJob(jobId: string): Promise<PipelineJob | null> {
     try {
-      const response = await axios.get(`http://localhost:3002/api/pipeline/jobs/${jobId}`);
+      const response = await axios.get(`http://localhost:3001/api/pipeline/jobs/${jobId}`);
       return response.data.job || null;
     } catch (error) {
       console.error(`Failed to get pipeline job ${jobId}:`, error);
@@ -269,7 +275,7 @@ export const pipelineApi = {
 export const autoDownloadApi = {
   async getConfig(): Promise<AutoDownloadConfig | null> {
     try {
-      const response = await axios.get('http://localhost:3002/api/auto-download/config');
+      const response = await axios.get('http://localhost:3001/api/auto-download/config');
       return response.data.config || null;
     } catch (error) {
       console.error('Failed to get auto-download config:', error);
@@ -279,7 +285,7 @@ export const autoDownloadApi = {
 
   async updateConfig(config: Partial<AutoDownloadConfig>): Promise<boolean> {
     try {
-      await axios.put('http://localhost:3002/api/auto-download/config', config);
+      await axios.put('http://localhost:3001/api/auto-download/config', config);
       return true;
     } catch (error) {
       console.error('Failed to update auto-download config:', error);
@@ -289,7 +295,7 @@ export const autoDownloadApi = {
 
   async getStatus(): Promise<{ enabled: boolean; nextRun?: string; lastRun?: string } | null> {
     try {
-      const response = await axios.get('http://localhost:3002/api/auto-download/status');
+      const response = await axios.get('http://localhost:3001/api/auto-download/status');
       return response.data || null;
     } catch (error) {
       console.error('Failed to get auto-download status:', error);
