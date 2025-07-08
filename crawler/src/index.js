@@ -7,6 +7,8 @@ const { connectDB } = require('./db/connection');
 const searchRoutes = require('./routes/search');
 const downloadRoutes = require('./routes/download');
 const queueRoutes = require('./routes/queue');
+const autoRoutes = require('./routes/auto');
+const pipelineRoutes = require('./routes/pipeline');
 const { initializeQueue } = require('./services/queueManager');
 
 const app = express();
@@ -21,6 +23,8 @@ app.use(express.json());
 app.use('/api/search', searchRoutes);
 app.use('/api/download', downloadRoutes);
 app.use('/api/queue', queueRoutes);
+app.use('/api/auto', autoRoutes);
+app.use('/api/pipeline', pipelineRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

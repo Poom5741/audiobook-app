@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Download Control</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .status { padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+        .status.running { background: #d4edda; border: 1px solid #c3e6cb; }
+        .status.stopped { background: #f8d7da; border: 1px solid #f5c6cb; }
+        .controls { display: flex; gap: 1rem; margin: 1rem 0; }
+        button { padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        input { padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; }
+        .config { margin: 2rem 0; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+        .field { margin: 1rem 0; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: bold; }
+        #log { background: #f8f9fa; padding: 1rem; border-radius: 4px; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 Auto-Download Control Panel</h1>
+        
+        <div id="status" class="status">
+            <h3>Status: <span id="statusText">Loading...</span></h3>
+            <p>Running: <span id="running">-</span></p>
+            <p>Interval: <span id="interval">-</span>ms</p>
+            <p>Max per session: <span id="maxPerSession">-</span></p>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn-success">▶️ Start Auto-Download</button>
+            <button id="stopBtn" class="btn-danger">⏹️ Stop Auto-Download</button>
+            <button id="downloadNowBtn" class="btn-primary">⬇️ Download Now</button>
+            <button id="refreshBtn" class="btn-primary">🔄 Refresh Status</button>
+        </div>
+
+        <div class="config">
+            <h3>Configuration</h3>
+            <div class="field">
+                <label for="intervalInput">Interval (minutes):</label>
+                <input type="number" id="intervalInput" min="1" value="60">
+            </div>
+            <div class="field">
+                <label for="maxPerSessionInput">Max downloads per session:</label>
+                <input type="number" id="maxPerSessionInput" min="1" max="10" value="3">
+            </div>
+            <div class="field">
+                <label for="queriesInput">Search queries (comma-separated):</label>
+                <input type="text" id="queriesInput" value="science fiction,fantasy,mystery,programming" style="width: 100%;">
+            </div>
+            <button id="updateConfigBtn" class="btn-primary">💾 Update Configuration</button>
+        </div>
+
+        <div class="config">
+            <h3>Activity Log</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3001/api/auto';
+        
+        // DOM elements
+        const statusDiv = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
+        const runningSpan = document.getElementById('running');
+        const intervalSpan = document.getElementById('interval');
+        const maxPerSessionSpan = document.getElementById('maxPerSession');
+        const logDiv = document.getElementById('log');
+        
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const downloadNowBtn = document.getElementById('downloadNowBtn');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const updateConfigBtn = document.getElementById('updateConfigBtn');
+        
+        const intervalInput = document.getElementById('intervalInput');
+        const maxPerSessionInput = document.getElementById('maxPerSessionInput');
+        const queriesInput = document.getElementById('queriesInput');
+
+        // Event listeners
+        startBtn.addEventListener('click', startAutoDownload);
+        stopBtn.addEventListener('click', stopAutoDownload);
+        downloadNowBtn.addEventListener('click', downloadNow);
+        refreshBtn.addEventListener('click', refreshStatus);
+        updateConfigBtn.addEventListener('click', updateConfig);
+
+        // Functions
+        async function fetchStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/status`);
+                const data = await response.json();
+                updateUI(data);
+                return data;
+            } catch (error) {
+                log('Error fetching status: ' + error.message);
+                return null;
+            }
+        }
+
+        function updateUI(status) {
+            if (!status) return;
+
+            runningSpan.textContent = status.running ? 'Yes' : 'No';
+            intervalSpan.textContent = status.interval;
+            maxPerSessionSpan.textContent = status.maxPerSession;
+            
+            if (status.running) {
+                statusText.textContent = 'Running';
+                statusDiv.className = 'status running';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                statusText.textContent = 'Stopped';
+                statusDiv.className = 'status stopped';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+
+            // Update form values
+            intervalInput.value = Math.round(status.interval / 60000); // Convert to minutes
+            maxPerSessionInput.value = status.maxPerSession;
+        }
+
+        async function startAutoDownload() {
+            try {
+                const response = await fetch(`${API_BASE}/start`, { method: 'POST' });
+                const data = await response.json();
+                log('✅ ' + data.message);
+                refreshStatus();
+            } catch (error) {
+                log('❌ Error starting auto-download: ' + error.message);
+            }
+        }
+
+        async function stopAutoDownload() {
+            try {
+                const response = await fetch(`${API_BASE}/stop`, { method: 'POST' });
+                const data = await response.json();
+                log('⏹️ ' + data.message);
+                refreshStatus();
+            } catch (error) {
+                log('❌ Error stopping auto-download: ' + error.message);
+            }
+        }
+
+        async function downloadNow() {
+            try {
+                const response = await fetch(`${API_BASE}/download-now`, { method: 'POST' });
+                const data = await response.json();
+                log('⬇️ ' + data.message);
+            } catch (error) {
+                log('❌ Error starting manual download: ' + error.message);
+            }
+        }
+
+        async function updateConfig() {
+            try {
+                const config = {
+                    interval: parseInt(intervalInput.value) * 60000, // Convert to ms
+                    maxPerSession: parseInt(maxPerSessionInput.value),
+                    searchQueries: queriesInput.value.split(',').map(q => q.trim()).filter(q => q)
+                };
+
+                const response = await fetch(`${API_BASE}/config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const data = await response.json();
+                log('💾 ' + data.message);
+                refreshStatus();
+            } catch (error) {
+                log('❌ Error updating config: ' + error.message);
+            }
+        }
+
+        function refreshStatus() {
+            fetchStatus();
+        }
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.textContent += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Initialize
+        fetchStatus();
+        setInterval(fetchStatus, 30000); // Refresh every 30 seconds
+        log('🚀 Auto-Download Control Panel loaded');
+    </script>
+</body>
+</html>

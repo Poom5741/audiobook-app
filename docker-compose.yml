@@ -52,10 +52,15 @@ services:
       context: ./crawler
       dockerfile: Dockerfile
     container_name: audiobook-crawler
+    ports:
+      - "3001:3001"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - BOOKS_PATH=/books
       - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+      - AUTO_DOWNLOAD_ENABLED=true
+      - AUTO_DOWNLOAD_INTERVAL=3600000
+      - AUTO_DOWNLOAD_MAX_PER_SESSION=3
     volumes:
       - ./crawler:/app
       - /app/node_modules
