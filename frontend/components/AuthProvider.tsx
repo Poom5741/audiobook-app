@@ -32,9 +32,13 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   // Simplified auth - always allow access for now
-  const [authStatus, setAuthStatus] = useState({
+  const [authStatus, setAuthStatus] = useState<{
+    isAuthenticated: boolean;
+    user: User | null;
+    loading: boolean;
+  }>({
     isAuthenticated: true, // Always authenticated for now
-    user: { id: 'temp', username: 'temp', role: 'admin' } as User,
+    user: { id: 'temp', username: 'temp', role: 'admin' },
     loading: false
   });
 
