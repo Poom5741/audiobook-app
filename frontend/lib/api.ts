@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { addAuthToApi } from './auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 
@@ -9,6 +10,9 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Add authentication to API calls
+addAuthToApi(api);
 
 // Types
 export interface Book {
@@ -39,6 +43,50 @@ export interface AudioInfo {
   duration: number;
   created: number;
   modified: number;
+}
+
+export interface SearchResult {
+  id: string;
+  title: string;
+  author: string;
+  year?: string;
+  format: string;
+  size?: string;
+  url: string;
+}
+
+export interface DownloadJob {
+  id: string;
+  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  title: string;
+  author: string;
+  format: string;
+  progress: number;
+  url?: string;
+  error?: string;
+  created_at: string;
+}
+
+export interface PipelineJob {
+  id: string;
+  status: 'pending' | 'searching' | 'downloading' | 'parsing' | 'generating' | 'completed' | 'failed';
+  searchQuery: string;
+  currentStep: string;
+  progress: number;
+  bookTitle?: string;
+  bookAuthor?: string;
+  totalSteps: number;
+  completedSteps: number;
+  error?: string;
+  created_at: string;
+}
+
+export interface AutoDownloadConfig {
+  enabled: boolean;
+  interval: number;
+  searchQueries: string[];
+  maxBooks: number;
+  formats: string[];
 }
 
 // API functions
@@ -100,6 +148,152 @@ export const booksApi = {
     } catch (error) {
       console.error(`Failed to generate audio for ${slug}/${chapter}:`, error);
       return false;
+    }
+  },
+};
+
+// Search API
+export const searchApi = {
+  async searchBooks(query: string, formats: string[] = ['epub', 'pdf']): Promise<SearchResult[]> {
+    try {
+      const response = await axios.get('http://localhost:3002/api/search', {
+        params: { q: query, formats: formats.join(',') }
+      });
+      return response.data.results || [];
+    } catch (error) {
+      console.error('Failed to search books:', error);
+      return [];
+    }
+  },
+};
+
+// Download API  
+export const downloadApi = {
+  async downloadBook(url: string, title: string, author: string, format: string): Promise<string | null> {
+    try {
+      const response = await axios.post('http://localhost:3002/api/download', {
+        url, title, author, format
+      });
+      return response.data.jobId || null;
+    } catch (error) {
+      console.error('Failed to start download:', error);
+      return null;
+    }
+  },
+
+  async getDownloadJobs(): Promise<DownloadJob[]> {
+    try {
+      const response = await axios.get('http://localhost:3002/api/downloads');
+      return response.data.jobs || [];
+    } catch (error) {
+      console.error('Failed to get download jobs:', error);
+      return [];
+    }
+  },
+
+  async getDownloadJob(jobId: string): Promise<DownloadJob | null> {
+    try {
+      const response = await axios.get(`http://localhost:3002/api/downloads/${jobId}`);
+      return response.data.job || null;
+    } catch (error) {
+      console.error(`Failed to get download job ${jobId}:`, error);
+      return null;
+    }
+  },
+};
+
+// Pipeline API
+export const pipelineApi = {
+  async createAudiobook(
+    searchQuery: string, 
+    format: string[] = ['epub', 'pdf'], 
+    maxBooks: number = 1,
+    options: {
+      summarize?: boolean;
+      summaryStyle?: 'concise' | 'detailed' | 'bullets' | 'key-points';
+    } = {}
+  ): Promise<string | null> {
+    try {
+      const response = await axios.post('http://localhost:3002/api/pipeline/create-audiobook', {
+        searchQuery, 
+        format, 
+        maxBooks,
+        ...options
+      });
+      return response.data.jobId || null;
+    } catch (error) {
+      console.error('Failed to create audiobook:', error);
+      return null;
+    }
+  },
+
+  async createFromDirectLink(options: {
+    url: string;
+    title?: string;
+    author?: string;
+    formats: string[];
+    summarize?: boolean;
+    summaryStyle?: 'concise' | 'detailed' | 'bullets' | 'key-points';
+  }): Promise<string | null> {
+    try {
+      const response = await axios.post('http://localhost:3002/api/pipeline/create-from-link', options);
+      return response.data.jobId || null;
+    } catch (error) {
+      console.error('Failed to create audiobook from direct link:', error);
+      return null;
+    }
+  },
+
+  async getPipelineJobs(): Promise<PipelineJob[]> {
+    try {
+      const response = await axios.get('http://localhost:3002/api/pipeline/jobs');
+      return response.data.jobs || [];
+    } catch (error) {
+      console.error('Failed to get pipeline jobs:', error);
+      return [];
+    }
+  },
+
+  async getPipelineJob(jobId: string): Promise<PipelineJob | null> {
+    try {
+      const response = await axios.get(`http://localhost:3002/api/pipeline/jobs/${jobId}`);
+      return response.data.job || null;
+    } catch (error) {
+      console.error(`Failed to get pipeline job ${jobId}:`, error);
+      return null;
+    }
+  },
+};
+
+// Auto-download API
+export const autoDownloadApi = {
+  async getConfig(): Promise<AutoDownloadConfig | null> {
+    try {
+      const response = await axios.get('http://localhost:3002/api/auto-download/config');
+      return response.data.config || null;
+    } catch (error) {
+      console.error('Failed to get auto-download config:', error);
+      return null;
+    }
+  },
+
+  async updateConfig(config: Partial<AutoDownloadConfig>): Promise<boolean> {
+    try {
+      await axios.put('http://localhost:3002/api/auto-download/config', config);
+      return true;
+    } catch (error) {
+      console.error('Failed to update auto-download config:', error);
+      return false;
+    }
+  },
+
+  async getStatus(): Promise<{ enabled: boolean; nextRun?: string; lastRun?: string } | null> {
+    try {
+      const response = await axios.get('http://localhost:3002/api/auto-download/status');
+      return response.data || null;
+    } catch (error) {
+      console.error('Failed to get auto-download status:', error);
+      return null;
     }
   },
 };

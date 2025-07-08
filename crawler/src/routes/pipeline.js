@@ -109,6 +109,154 @@ router.delete('/:jobId', async (req, res) => {
     }
 });
 
+// Create audiobook from direct link (Anna's Archive, etc.)
+router.post('/create-from-link', async (req, res) => {
+    try {
+        const { 
+            url, 
+            title, 
+            author, 
+            formats = ['epub', 'pdf'], 
+            summarize = false, 
+            summaryStyle = 'concise' 
+        } = req.body;
+
+        if (!url) {
+            return res.status(400).json({ error: 'URL is required' });
+        }
+
+        // Validate URL format
+        try {
+            new URL(url);
+        } catch {
+            return res.status(400).json({ error: 'Invalid URL format' });
+        }
+
+        const jobId = `direct_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Initialize job tracking
+        const job = {
+            id: jobId,
+            type: 'direct-link',
+            url,
+            customTitle: title,
+            customAuthor: author,
+            formats,
+            summarize,
+            summaryStyle,
+            status: 'starting',
+            progress: 0,
+            steps: {
+                analyze: { status: 'pending', message: 'Analyzing direct link...' },
+                download: { status: 'pending', message: 'Waiting for download...' },
+                parse: { status: 'pending', message: 'Waiting for text extraction...' },
+                tts: { status: 'pending', message: 'Waiting for audio generation...' },
+                complete: { status: 'pending', message: 'Waiting for completion...' }
+            },
+            books: [],
+            createdAt: new Date(),
+            estimatedTime: '3-10 minutes'
+        };
+
+        pipelineJobs.set(jobId, job);
+
+        // Start direct link pipeline in background
+        processDirectLinkPipeline(jobId, url, { title, author, formats, summarize, summaryStyle });
+
+        res.json({
+            jobId,
+            status: 'started',
+            message: `Direct link pipeline started for "${url}"`,
+            trackingUrl: `/api/pipeline/status/${jobId}`,
+            estimatedTime: job.estimatedTime
+        });
+
+    } catch (error) {
+        logger.error('Direct link pipeline creation error:', error);
+        res.status(500).json({ error: 'Failed to start direct link pipeline', message: error.message });
+    }
+});
+
+async function processDirectLinkPipeline(jobId, url, options = {}) {
+    const job = pipelineJobs.get(jobId);
+    if (!job) return;
+
+    try {
+        // Step 1: Analyze the direct link
+        updateJobStep(jobId, 'analyze', 'running', 'Analyzing direct link...');
+        job.progress = 10;
+
+        const scraper = getScraper();
+        if (!scraper) {
+            throw new Error('Scraper service not available');
+        }
+
+        // Extract book details from the direct link
+        let bookDetails;
+        
+        if (url.includes('annas-archive.org') || url.includes('anna-archive.org')) {
+            // Handle Anna's Archive MD5 links
+            bookDetails = await scraper.getBookDetails(url);
+        } else {
+            // For other direct download links, try to extract metadata
+            bookDetails = await scraper.analyzeDirectLink(url);
+        }
+
+        if (!bookDetails) {
+            throw new Error('Could not extract book details from the provided link');
+        }
+
+        // Use custom title/author if provided
+        if (options.title) bookDetails.title = options.title;
+        if (options.author) bookDetails.author = options.author;
+
+        updateJobStep(jobId, 'analyze', 'completed', `Found: ${bookDetails.title} by ${bookDetails.author}`);
+        job.progress = 25;
+
+        // Step 2: Download the book directly
+        updateJobStep(jobId, 'download', 'running', `Downloading: ${bookDetails.title}`);
+        
+        const downloadResult = await addToDownloadQueue(
+            url, 
+            bookDetails, 
+            1, // Highest priority for direct links
+            {
+                formats: options.formats,
+                isDirectLink: true
+            }
+        );
+
+        if (downloadResult.status === 'queued' || downloadResult.status === 'exists') {
+            job.books.push({
+                title: bookDetails.title,
+                author: bookDetails.author,
+                url: url,
+                status: 'downloaded',
+                downloadedAt: new Date(),
+                format: bookDetails.format || 'unknown'
+            });
+
+            updateJobStep(jobId, 'download', 'completed', `Downloaded: ${bookDetails.title}`);
+            job.progress = 50;
+
+            // Step 3: Process the book (parse + TTS)
+            await processBookToPipeline(jobId, bookDetails, 1, 1, {
+                summarize: options.summarize,
+                summaryStyle: options.summaryStyle
+            });
+
+        } else {
+            throw new Error(`Download failed: ${downloadResult.error || 'Unknown error'}`);
+        }
+
+    } catch (error) {
+        logger.error(`Direct link pipeline ${jobId} failed:`, error);
+        job.status = 'failed';
+        job.error = error.message;
+        updateJobStep(jobId, job.steps.analyze.status === 'pending' ? 'analyze' : 'download', 'failed', error.message);
+    }
+}
+
 async function processPipeline(jobId, searchQuery, format, maxBooks) {
     const job = pipelineJobs.get(jobId);
     if (!job) return;
@@ -191,7 +339,7 @@ async function processPipeline(jobId, searchQuery, format, maxBooks) {
     }
 }
 
-async function processBookToPipeline(jobId, bookDetails, bookIndex, totalBooks) {
+async function processBookToPipeline(jobId, bookDetails, bookIndex, totalBooks, options = {}) {
     const job = pipelineJobs.get(jobId);
     if (!job || job.status === 'cancelled') return;
 
@@ -208,8 +356,11 @@ async function processBookToPipeline(jobId, bookDetails, bookIndex, totalBooks) 
         // Step 4: Generate TTS
         updateJobStep(jobId, 'tts', 'running', `Generating audio for: ${bookDetails.title}`);
         
-        // Call TTS service for each chapter
-        const chapters = await generateAudiobook(bookDetails);
+        // Call TTS service for each chapter (with summarization if enabled)
+        const chapters = await generateAudiobook(bookDetails, {
+            summarize: options.summarize,
+            summaryStyle: options.summaryStyle
+        });
         
         // Update book record with audio info
         const bookRecord = job.books.find(b => b.title === bookDetails.title);
@@ -248,7 +399,7 @@ async function processBookToPipeline(jobId, bookDetails, bookIndex, totalBooks) 
     }
 }
 
-async function generateAudiobook(bookDetails) {
+async function generateAudiobook(bookDetails, options = {}) {
     try {
         // Simulate chapter breakdown
         const chapters = [
@@ -261,17 +412,44 @@ async function generateAudiobook(bookDetails) {
         const audioChapters = [];
 
         for (let i = 0; i < chapters.length; i++) {
+            let chapterText = `This is ${chapters[i]} of ${bookDetails.title} by ${bookDetails.author}. [Simulated content for demonstration]`;
+            
+            // Apply summarization if enabled
+            if (options.summarize && options.summaryStyle) {
+                try {
+                    const summaryResponse = await fetch('http://summarizer:8001/api/summarize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            text: chapterText,
+                            style: options.summaryStyle,
+                            maxLength: 500,
+                            contentType: 'general'
+                        })
+                    });
+
+                    if (summaryResponse.ok) {
+                        const summaryResult = await summaryResponse.json();
+                        chapterText = summaryResult.summary || chapterText;
+                        logger.info(`Summarized chapter ${i + 1}: ${summaryResult.compressionRatio}% compression`);
+                    }
+                } catch (summaryError) {
+                    logger.warn(`Summarization failed for chapter ${i + 1}, using original text:`, summaryError);
+                }
+            }
+
             // Call TTS API
             const response = await fetch('http://tts-api:8000/tts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    text: `This is ${chapters[i]} of ${bookDetails.title} by ${bookDetails.author}. [Simulated content for demonstration]`,
+                    text: chapterText,
                     book: bookDetails.title.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase(),
                     chapter: `chapter-${i + 1}`,
                     speaker: '9017',
                     emotion: 'neutral',
-                    speed: 1.0
+                    speed: 1.0,
+                    summarized: options.summarize || false
                 })
             });
 
@@ -282,7 +460,9 @@ async function generateAudiobook(bookDetails) {
                     title: chapters[i],
                     audioPath: result.audio_path,
                     duration: result.duration,
-                    fileSize: result.file_size
+                    fileSize: result.file_size,
+                    summarized: options.summarize || false,
+                    summaryStyle: options.summaryStyle || null
                 });
             }
 

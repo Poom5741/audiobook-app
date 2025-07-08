@@ -13,12 +13,20 @@ router.post('/generate/:bookId',
     param('bookId').isUUID(),
     body('voice').optional().isString(),
     body('model').optional().isIn(['bark', 'tortoise']),
-    body('priority').optional().isInt({ min: 0, max: 10 })
+    body('priority').optional().isInt({ min: 0, max: 10 }),
+    body('summarize').optional().isBoolean(),
+    body('summarizeOptions').optional().isObject()
   ]),
   async (req, res) => {
     try {
       const { bookId } = req.params;
-      const { voice = 'default', model = 'bark', priority = 0 } = req.body;
+      const { 
+        voice = 'default', 
+        model = 'bark', 
+        priority = 0,
+        summarize = false,
+        summarizeOptions = {}
+      } = req.body;
       
       // Check if book exists and get chapters
       const chaptersQuery = `
@@ -70,7 +78,9 @@ router.post('/generate/:bookId',
             bookTitle: chapter.book_title,
             author: chapter.author,
             voice: voice,
-            model: model
+            model: model,
+            summarize: summarize,
+            summarizeOptions: summarizeOptions
           };
           
           const job = await addTTSJob(jobData, priority);
@@ -101,7 +111,7 @@ router.post('/generate/:bookId',
         totalChapters: chapters.length,
         queuedChapters: jobIds.length,
         jobs: jobIds,
-        settings: { voice, model, priority }
+        settings: { voice, model, priority, summarize, summarizeOptions }
       });
       
     } catch (error) {
@@ -118,12 +128,20 @@ router.post('/generate/:bookId/:chapterId',
     param('chapterId').isUUID(),
     body('voice').optional().isString(),
     body('model').optional().isIn(['bark', 'tortoise']),
-    body('priority').optional().isInt({ min: 0, max: 10 })
+    body('priority').optional().isInt({ min: 0, max: 10 }),
+    body('summarize').optional().isBoolean(),
+    body('summarizeOptions').optional().isObject()
   ]),
   async (req, res) => {
     try {
       const { bookId, chapterId } = req.params;
-      const { voice = 'default', model = 'bark', priority = 0 } = req.body;
+      const { 
+        voice = 'default', 
+        model = 'bark', 
+        priority = 0,
+        summarize = false,
+        summarizeOptions = {}
+      } = req.body;
       
       // Get chapter data
       const query = `
@@ -174,7 +192,9 @@ router.post('/generate/:bookId/:chapterId',
         bookTitle: chapter.book_title,
         author: chapter.author,
         voice: voice,
-        model: model
+        model: model,
+        summarize: summarize,
+        summarizeOptions: summarizeOptions
       };
       
       const job = await addTTSJob(jobData, priority);
@@ -186,7 +206,7 @@ router.post('/generate/:bookId/:chapterId',
         chapterId: chapter.id,
         chapterTitle: chapter.title,
         jobId: job.id,
-        settings: { voice, model, priority }
+        settings: { voice, model, priority, summarize, summarizeOptions }
       });
       
     } catch (error) {
@@ -343,6 +363,87 @@ router.delete('/queue/:jobId', async (req, res) => {
   } catch (error) {
     logger.error('Cancel TTS job error:', error);
     res.status(500).json({ error: 'Failed to cancel job' });
+  }
+});
+
+// POST /api/tts/summarize - Test summarization for text
+router.post('/summarize',
+  validateRequest([
+    body('text').isString().isLength({ min: 50, max: 100000 }),
+    body('style').optional().isIn(['concise', 'detailed', 'bullets', 'key-points']),
+    body('maxLength').optional().isInt({ min: 100, max: 2000 }),
+    body('contentType').optional().isIn(['general', 'instructional', 'analytical', 'narrative', 'howto'])
+  ]),
+  async (req, res) => {
+    try {
+      const { 
+        text, 
+        style = 'concise', 
+        maxLength = 500, 
+        contentType = 'narrative' 
+      } = req.body;
+      
+      const summarizerApiUrl = process.env.SUMMARIZER_API_URL || 'http://localhost:8001';
+      
+      const response = await axios.post(`${summarizerApiUrl}/api/summarize`, {
+        text,
+        style,
+        maxLength,
+        contentType
+      }, {
+        timeout: 60000
+      });
+      
+      res.json({
+        success: true,
+        original: {
+          length: text.length,
+          wordCount: text.split(/\s+/).length
+        },
+        summary: response.data.summary,
+        summaryLength: response.data.summaryLength,
+        compressionRatio: response.data.compressionRatio,
+        provider: response.data.provider || 'ollama',
+        settings: { style, maxLength, contentType }
+      });
+      
+    } catch (error) {
+      logger.error('Summarization test error:', error);
+      
+      const errorMessage = error.response?.data?.message || error.message;
+      const statusCode = error.response?.status || 500;
+      
+      res.status(statusCode).json({ 
+        error: 'Summarization failed',
+        message: errorMessage,
+        provider: 'ollama'
+      });
+    }
+  }
+);
+
+// GET /api/tts/summarize/health - Check summarization service health
+router.get('/summarize/health', async (req, res) => {
+  try {
+    const summarizerApiUrl = process.env.SUMMARIZER_API_URL || 'http://localhost:8001';
+    
+    const response = await axios.get(`${summarizerApiUrl}/api/summarize/health`, {
+      timeout: 5000
+    });
+    
+    res.json({
+      summarizerService: response.data,
+      apiUrl: summarizerApiUrl
+    });
+    
+  } catch (error) {
+    logger.error('Summarization health check error:', error);
+    
+    res.status(503).json({
+      error: 'Summarization service unavailable',
+      message: error.message,
+      apiUrl: process.env.SUMMARIZER_API_URL || 'http://localhost:8001'
+    });
   }
 });
 

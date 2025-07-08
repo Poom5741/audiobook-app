@@ -33,7 +33,9 @@ async function initializeQueue() {
       bookTitle,
       author,
       voice = 'default',
-      model = 'bark'
+      model = 'bark',
+      summarize = false,
+      summarizeOptions = {}
     } = job.data;
 
     try {
@@ -42,8 +44,39 @@ async function initializeQueue() {
       // Update progress
       await job.progress(10);
 
+      let processedText = text;
+      
+      // Summarize text if enabled
+      if (summarize) {
+        logger.info(`Summarizing text for chapter: ${title}`);
+        
+        try {
+          const summarizerApiUrl = process.env.SUMMARIZER_API_URL || 'http://localhost:8001';
+          const summarizeResponse = await axios.post(`${summarizerApiUrl}/api/summarize`, {
+            text: text,
+            style: summarizeOptions.style || 'concise',
+            maxLength: summarizeOptions.maxLength || 500,
+            contentType: summarizeOptions.contentType || 'narrative'
+          }, {
+            timeout: 60000 // 1 minute timeout for summarization
+          });
+          
+          if (summarizeResponse.data && summarizeResponse.data.summary) {
+            processedText = summarizeResponse.data.summary;
+            logger.info(`Text summarized: ${text.length} → ${processedText.length} chars (${summarizeResponse.data.compressionRatio}% compression)`);
+          } else {
+            logger.warn('Summarization response was empty, using original text');
+          }
+        } catch (summaryError) {
+          logger.error('Summarization failed, using original text:', summaryError.message);
+          // Continue with original text if summarization fails
+        }
+      }
+
+      await job.progress(20);
+
       // Prepare text for TTS
-      const cleanedText = text
+      const cleanedText = processedText
         .replace(/\s+/g, ' ')
         .replace(/[^\w\s.,!?;:'"()-]/g, '')
         .trim();
@@ -53,7 +86,7 @@ async function initializeQueue() {
       }
 
       // Call TTS API
-      await job.progress(20);
+      await job.progress(30);
       
       const ttsApiUrl = process.env.TTS_API_URL;
       if (!ttsApiUrl) {
@@ -72,7 +105,7 @@ async function initializeQueue() {
         responseType: 'stream'
       });
 
-      await job.progress(50);
+      await job.progress(60);
 
       // Create audio file path
       const audioDir = path.join(process.env.AUDIO_PATH || '/audio', bookId);
@@ -89,7 +122,7 @@ async function initializeQueue() {
       ttsResponse.data.on('data', (chunk) => {
         totalSize += chunk.length;
         // Update progress based on data received (rough estimate)
-        const progress = Math.min(50 + (totalSize / 1000000) * 30, 80);
+        const progress = Math.min(60 + (totalSize / 1000000) * 20, 80);
         job.progress(progress);
       });
 
@@ -134,7 +167,10 @@ async function initializeQueue() {
         audioPath: relativeAudioPath,
         fileSize: stats.size,
         duration: estimatedDuration,
-        wordCount
+        wordCount,
+        summarized: summarize,
+        originalTextLength: text.length,
+        processedTextLength: processedText.length
       };
 
     } catch (error) {
