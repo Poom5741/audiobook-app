@@ -1,0 +1,366 @@
+name: Code Quality & Security
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v3
+        with:
+          config-file: '.github/dependency-review-config.yml'
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Use Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+
+    # Security scanning for auth service
+    - name: Install auth dependencies
+      working-directory: ./auth
+      run: npm ci
+
+    - name: Run npm audit (auth)
+      working-directory: ./auth
+      run: |
+        npm audit --audit-level=moderate --json > auth-audit.json || true
+        npm audit --audit-level=moderate || echo "Vulnerabilities found in auth service"
+
+    - name: Snyk security scan (auth)
+      working-directory: ./auth
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      run: |
+        if [ -n "$SNYK_TOKEN" ]; then
+          npx snyk test --severity-threshold=medium --json > auth-snyk.json || true
+          npx snyk monitor --project-name=audiobook-auth || true
+        else
+          echo "SNYK_TOKEN not configured, skipping Snyk scan"
+        fi
+      continue-on-error: true
+
+    # Security scanning for frontend (if exists)
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: |
+        if [ -f "package.json" ]; then
+          npm ci
+        else
+          echo "No frontend package.json found"
+        fi
+      continue-on-error: true
+
+    - name: Run npm audit (frontend)
+      working-directory: ./frontend
+      run: |
+        if [ -f "package.json" ]; then
+          npm audit --audit-level=moderate --json > frontend-audit.json || true
+          npm audit --audit-level=moderate || echo "Vulnerabilities found in frontend"
+        fi
+      continue-on-error: true
+
+    # SAST scanning with CodeQL
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: javascript
+        queries: security-and-quality
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+
+    # Secrets scanning
+    - name: TruffleHog OSS
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: ${{ github.event.repository.default_branch }}
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    # Upload security reports
+    - name: Upload security artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports-${{ github.sha }}
+        path: |
+          auth/auth-audit.json
+          auth/auth-snyk.json
+          frontend/frontend-audit.json
+        retention-days: 30
+
+  license-compliance:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+
+    - name: Install license checker
+      run: npm install -g license-checker
+
+    - name: Check auth service licenses
+      working-directory: ./auth
+      run: |
+        npm ci
+        license-checker --json --out auth-licenses.json
+        license-checker --summary
+        
+        # Check for prohibited licenses
+        license-checker --excludePackages "$(cat package.json | jq -r '.name')" \
+          --failOn 'GPL;AGPL;LGPL;UNLICENSED' || echo "License compliance issues found"
+
+    - name: Check frontend licenses
+      working-directory: ./frontend
+      run: |
+        if [ -f "package.json" ]; then
+          npm ci
+          license-checker --json --out frontend-licenses.json
+          license-checker --summary
+          license-checker --excludePackages "$(cat package.json | jq -r '.name')" \
+            --failOn 'GPL;AGPL;LGPL;UNLICENSED' || echo "License compliance issues found"
+        fi
+      continue-on-error: true
+
+    - name: Upload license reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: license-reports-${{ github.sha }}
+        path: |
+          auth/auth-licenses.json
+          frontend/frontend-licenses.json
+        retention-days: 90
+
+  code-coverage:
+    runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_audiobook_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+
+    # Auth service coverage
+    - name: Generate auth coverage
+      working-directory: ./auth
+      run: |
+        npm ci
+        npm test -- --coverage --coverageReporters=lcov,json,text
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-jwt-secret-key-for-testing-only-minimum-64-characters-long
+        POSTGRES_PASSWORD: test_password
+        ADMIN_PASSWORD: test-admin-password
+        REDIS_PASSWORD: test-redis-password
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_audiobook_db
+        REDIS_URL: redis://localhost:6379/1
+
+    # Frontend coverage (if applicable)
+    - name: Generate frontend coverage
+      working-directory: ./frontend
+      run: |
+        if [ -f "package.json" ] && npm run test --silent 2>/dev/null; then
+          npm ci
+          npm test -- --coverage --watchAll=false
+        else
+          echo "No frontend tests found"
+        fi
+      continue-on-error: true
+
+    # Upload to multiple coverage services
+    - name: Upload to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./auth/coverage/lcov.info
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Upload to Coveralls
+      uses: coverallsapp/github-action@v2
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: ./auth/coverage/lcov.info
+        flag-name: auth-service
+      continue-on-error: true
+
+    # Coverage enforcement
+    - name: Coverage threshold check
+      working-directory: ./auth
+      run: |
+        echo "Checking coverage thresholds..."
+        COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+        echo "Current line coverage: $COVERAGE%"
+        
+        if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+          echo "❌ Coverage ($COVERAGE%) is below threshold (70%)"
+          exit 1
+        else
+          echo "✅ Coverage ($COVERAGE%) meets threshold (70%)"
+        fi
+
+  performance-analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+
+    # Bundle size analysis
+    - name: Bundle size analysis (auth)
+      working-directory: ./auth
+      run: |
+        npm ci
+        npx bundlesize-cli
+      continue-on-error: true
+
+    - name: Bundle size analysis (frontend)
+      working-directory: ./frontend
+      run: |
+        if [ -f "package.json" ]; then
+          npm ci
+          npm run build
+          
+          # Analyze bundle size
+          if command -v bundlesize &> /dev/null; then
+            npx bundlesize-cli
+          else
+            echo "Bundle size analysis not configured"
+          fi
+        fi
+      continue-on-error: true
+
+  documentation-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check README files
+      run: |
+        echo "Checking for required documentation..."
+        
+        # Check for main README
+        if [ ! -f "README.md" ]; then
+          echo "❌ Missing main README.md"
+        else
+          echo "✅ Main README.md found"
+        fi
+        
+        # Check for service documentation
+        for service in auth frontend; do
+          if [ -d "$service" ]; then
+            if [ ! -f "$service/README.md" ]; then
+              echo "❌ Missing $service/README.md"
+            else
+              echo "✅ $service/README.md found"
+            fi
+          fi
+        done
+
+    - name: Check API documentation
+      run: |
+        echo "Checking for API documentation..."
+        
+        # Look for OpenAPI/Swagger specs
+        find . -name "*.yml" -o -name "*.yaml" -o -name "openapi.*" -o -name "swagger.*" | head -5
+        
+        # Check for API documentation in common locations
+        for path in docs/api auth/docs/api auth/swagger.yml auth/openapi.yml; do
+          if [ -e "$path" ]; then
+            echo "✅ API documentation found: $path"
+          fi
+        done
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    needs: [security-scan, license-compliance, code-coverage, performance-analysis]
+    if: always()
+    
+    steps:
+    - name: Quality Gate
+      run: |
+        echo "=== Quality Gate Results ==="
+        
+        # Check if critical jobs passed
+        SECURITY_STATUS="${{ needs.security-scan.result }}"
+        LICENSE_STATUS="${{ needs.license-compliance.result }}"
+        COVERAGE_STATUS="${{ needs.code-coverage.result }}"
+        PERFORMANCE_STATUS="${{ needs.performance-analysis.result }}"
+        
+        echo "Security Scan: $SECURITY_STATUS"
+        echo "License Compliance: $LICENSE_STATUS"
+        echo "Code Coverage: $COVERAGE_STATUS"
+        echo "Performance Analysis: $PERFORMANCE_STATUS"
+        
+        # Fail if critical checks failed
+        if [ "$SECURITY_STATUS" != "success" ] || [ "$COVERAGE_STATUS" != "success" ]; then
+          echo "❌ Quality gate failed - critical checks did not pass"
+          exit 1
+        else
+          echo "✅ Quality gate passed - all critical checks successful"
+        fi

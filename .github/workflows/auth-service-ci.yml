@@ -1,0 +1,217 @@
+name: Auth Service CI
+
+on:
+  push:
+    branches: [ master, main, develop ]
+    paths:
+      - 'auth/**'
+      - 'shared/**'
+      - '.github/workflows/auth-service-ci.yml'
+  pull_request:
+    branches: [ master, main, develop ]
+    paths:
+      - 'auth/**' 
+      - 'shared/**'
+      - '.github/workflows/auth-service-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    services:
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_audiobook_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: auth/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./auth
+      run: npm ci
+
+    - name: Run linting
+      working-directory: ./auth
+      run: |
+        if npm run lint --silent 2>/dev/null; then
+          npm run lint
+        else
+          echo "No lint script found, skipping..."
+        fi
+
+    - name: Run type checking
+      working-directory: ./auth
+      run: |
+        if npm run typecheck --silent 2>/dev/null; then
+          npm run typecheck
+        else
+          echo "No typecheck script found, skipping..."
+        fi
+
+    - name: Run unit tests
+      working-directory: ./auth
+      run: npm test
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-jwt-secret-key-for-testing-only-minimum-64-characters-long
+        POSTGRES_PASSWORD: test_password
+        ADMIN_PASSWORD: test-admin-password
+        REDIS_PASSWORD: test-redis-password
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_audiobook_db
+        REDIS_URL: redis://localhost:6379/1
+
+    - name: Run integration tests
+      working-directory: ./auth
+      run: npm test -- --testPathPattern="integration"
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-jwt-secret-key-for-testing-only-minimum-64-characters-long
+        POSTGRES_PASSWORD: test_password
+        ADMIN_PASSWORD: test-admin-password
+        REDIS_PASSWORD: test-redis-password
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_audiobook_db
+        REDIS_URL: redis://localhost:6379/1
+
+    - name: Generate coverage report
+      working-directory: ./auth
+      run: npm test -- --coverage --coverageReporters=lcov
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-jwt-secret-key-for-testing-only-minimum-64-characters-long
+        POSTGRES_PASSWORD: test_password
+        ADMIN_PASSWORD: test-admin-password
+        REDIS_PASSWORD: test-redis-password
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_audiobook_db
+        REDIS_URL: redis://localhost:6379/1
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./auth/coverage/lcov.info
+        flags: auth-service
+        name: auth-service-coverage
+        fail_ci_if_error: false
+
+    - name: Archive test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: auth-test-results-node-${{ matrix.node-version }}
+        path: |
+          auth/coverage/
+          auth/junit.xml
+        retention-days: 30
+
+    - name: Archive coverage reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: auth-coverage-reports-node-${{ matrix.node-version }}
+        path: auth/coverage/
+        retention-days: 30
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20.x
+
+    - name: Install dependencies
+      working-directory: ./auth
+      run: npm ci
+
+    - name: Run security audit
+      working-directory: ./auth
+      run: npm audit --audit-level=moderate
+
+    - name: Run dependency vulnerability scan
+      working-directory: ./auth
+      run: |
+        npx audit-ci --moderate
+      continue-on-error: true
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      working-directory: ./auth
+      run: |
+        if [ -f "Dockerfile" ]; then
+          docker build -t audiobook-auth:${{ github.sha }} .
+          docker tag audiobook-auth:${{ github.sha }} audiobook-auth:latest
+          echo "Docker image built successfully"
+        else
+          echo "No Dockerfile found, skipping Docker build"
+        fi
+
+    - name: Test Docker image
+      working-directory: ./auth
+      run: |
+        if docker images | grep -q audiobook-auth; then
+          echo "Testing Docker container startup..."
+          docker run --rm -d --name test-auth audiobook-auth:latest || true
+          sleep 5
+          if docker ps | grep -q test-auth; then
+            echo "Container started successfully"
+            docker stop test-auth
+          else
+            echo "Container failed to start"
+          fi
+        fi

@@ -1,9 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const { RateLimiterMemory } = require('rate-limiter-flexible');
 const winston = require('winston');
+const { 
+  createRateLimitMiddleware, 
+  detectSuspiciousActivity,
+  createTrustedIPMiddleware
+} = require('./middleware/rateLimiting');
 
 // Routes
 const authRoutes = require('./routes/auth');
@@ -37,23 +40,15 @@ const logger = winston.createLogger({
   ]
 });
 
-// Rate limiter for login attempts
-const loginLimiter = new RateLimiterMemory({
-  keyGenerator: (req) => req.ip,
-  points: parseInt(process.env.MAX_LOGIN_ATTEMPTS) || 5,
-  duration: (parseInt(process.env.LOGIN_WINDOW_MINUTES) || 15) * 60,
-});
+// Enhanced rate limiting middlewares
+const generalRateLimit = createRateLimitMiddleware('general');
+const loginRateLimit = createRateLimitMiddleware('login');
+const passwordChangeRateLimit = createRateLimitMiddleware('passwordChange');
+const tokenRefreshRateLimit = createRateLimitMiddleware('tokenRefresh');
 
-// General rate limiter
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: {
-    error: 'Too many requests from this IP, please try again later.',
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// Trusted IPs (load from environment or config)
+const trustedIPs = (process.env.TRUSTED_IPS || '').split(',').filter(Boolean);
+const trustedIPMiddleware = createTrustedIPMiddleware(trustedIPs);
 
 const app = express();
 const PORT = process.env.PORT || 8002;
@@ -71,39 +66,89 @@ app.use(helmet({
   },
 }));
 
-app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5001',
-    'http://localhost:3002',
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
+// Environment-based CORS configuration
+const getAllowedOrigins = () => {
+  const baseOrigins = [];
+  
+  // Development origins
+  if (process.env.NODE_ENV === 'development') {
+    baseOrigins.push(
+      'http://localhost:3000',
+      'http://localhost:5001', 
+      'http://localhost:3002'
+    );
+  }
+  
+  // Production origins from environment
+  if (process.env.FRONTEND_URLS) {
+    const prodOrigins = process.env.FRONTEND_URLS.split(',').map(url => url.trim());
+    baseOrigins.push(...prodOrigins);
+  }
+  
+  // Legacy support
+  if (process.env.FRONTEND_URL) {
+    baseOrigins.push(process.env.FRONTEND_URL);
+  }
+  
+  return baseOrigins.filter(Boolean);
+};
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    const allowedOrigins = getAllowedOrigins();
+    
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin && process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      logger.warn(`CORS rejected origin: ${origin}`, {
+        allowedOrigins,
+        ip: origin
+      });
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+  maxAge: 86400 // 24 hours
+};
+
+app.use(cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Apply rate limiting
-app.use(generalLimiter);
-
-// Login rate limiting middleware
-app.use('/api/auth/login', async (req, res, next) => {
-  try {
-    await loginLimiter.consume(req.ip);
-    next();
-  } catch (rejRes) {
-    const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
-    res.set('Retry-After', String(secs));
-    logger.warn(`Login rate limit exceeded for IP: ${req.ip}`);
-    res.status(429).json({
-      error: 'Too many login attempts',
-      message: `Please try again in ${secs} seconds`,
-      retryAfter: secs
-    });
+// Apply security middlewares
+app.use(trustedIPMiddleware);
+app.use(detectSuspiciousActivity);
+app.use((req, res, next) => {
+  // Skip rate limiting for trusted IPs
+  if (req.trustedIP) {
+    return next();
   }
+  generalRateLimit(req, res, next);
+});
+
+// Enhanced rate limiting for specific endpoints
+app.use('/api/auth/login', (req, res, next) => {
+  if (req.trustedIP) return next();
+  loginRateLimit(req, res, next);
+});
+
+app.use('/api/auth/change-password', (req, res, next) => {
+  if (req.trustedIP) return next();
+  passwordChangeRateLimit(req, res, next);
+});
+
+app.use('/api/auth/refresh', (req, res, next) => {
+  if (req.trustedIP) return next();
+  tokenRefreshRateLimit(req, res, next);
 });
 
 // Logging middleware

@@ -5,6 +5,8 @@ const winston = require('winston');
 
 const { validateAdminCredentials, getAdminInfo, updateAdminPassword } = require('../utils/admin');
 const { authenticateToken } = require('../middleware/auth');
+const { loadSecret } = require('../../../shared/secrets-loader');
+const { generateTokenPair, refreshAccessToken, revokeRefreshToken, revokeAllUserTokens } = require('../utils/jwt');
 
 const router = express.Router();
 
@@ -52,36 +54,32 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Generate JWT token
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      logger.error('JWT_SECRET not configured');
+    // Generate access and refresh token pair
+    let tokens;
+    try {
+      tokens = generateTokenPair(result.user);
+    } catch (error) {
+      logger.error('Token generation failed:', error.message);
       return res.status(500).json({
         error: 'Authentication service misconfigured'
       });
     }
 
-    const token = jwt.sign(
-      { 
-        userId: result.user.id,
-        username: result.user.username,
-        role: result.user.role
-      },
-      jwtSecret,
-      { 
-        expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-        issuer: 'audiobook-auth',
-        audience: 'audiobook-app'
-      }
-    );
-
-    // Set secure HTTP-only cookie
+    // Set secure HTTP-only cookies for both tokens
     const isProduction = process.env.NODE_ENV === 'production';
-    res.cookie('authToken', token, {
+    res.cookie('accessToken', tokens.accessToken, {
       httpOnly: true,
       secure: isProduction,
       sameSite: isProduction ? 'strict' : 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      maxAge: 15 * 60 * 1000 // 15 minutes
+    });
+    
+    res.cookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/api/auth/refresh' // Restrict refresh token to refresh endpoint
     });
 
     logger.info(`Successful login for user: ${username}`, {
@@ -97,7 +95,9 @@ router.post('/login', async (req, res) => {
         role: result.user.role,
         lastLogin: result.user.lastLogin
       },
-      token // Also return token for API usage
+      accessToken: tokens.accessToken,
+      expiresIn: tokens.expiresIn,
+      tokenType: tokens.tokenType
     });
 
   } catch (error) {
@@ -111,10 +111,18 @@ router.post('/login', async (req, res) => {
 
 /**
  * POST /api/auth/logout
- * Logout (clear cookie)
+ * Logout (clear cookies and revoke refresh token)
  */
 router.post('/logout', authenticateToken, (req, res) => {
-  res.clearCookie('authToken');
+  // Revoke refresh token if present
+  const refreshToken = req.cookies.refreshToken;
+  if (refreshToken) {
+    revokeRefreshToken(refreshToken);
+  }
+  
+  // Clear both cookies
+  res.clearCookie('accessToken');
+  res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
   
   logger.info(`User logged out: ${req.user?.username}`, {
     userId: req.user?.userId,
@@ -124,6 +132,88 @@ router.post('/logout', authenticateToken, (req, res) => {
   res.json({
     message: 'Logout successful'
   });
+});
+
+/**
+ * POST /api/auth/refresh
+ * Refresh access token using refresh token
+ */
+router.post('/refresh', (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    
+    if (!refreshToken) {
+      return res.status(401).json({
+        error: 'Refresh token required',
+        message: 'Please log in again'
+      });
+    }
+    
+    // Refresh the access token
+    const result = refreshAccessToken(
+      refreshToken,
+      req.get('User-Agent'),
+      req.ip
+    );
+    
+    // Set new access token cookie
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('accessToken', result.accessToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax',
+      maxAge: 15 * 60 * 1000 // 15 minutes
+    });
+    
+    res.json({
+      message: 'Token refreshed successfully',
+      accessToken: result.accessToken,
+      expiresIn: result.expiresIn,
+      tokenType: result.tokenType
+    });
+    
+  } catch (error) {
+    logger.warn('Token refresh failed:', {
+      error: error.message,
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    });
+    
+    // Clear invalid refresh token
+    res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
+    
+    res.status(401).json({
+      error: 'Token refresh failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/auth/revoke-all
+ * Revoke all refresh tokens for current user
+ */
+router.post('/revoke-all', authenticateToken, (req, res) => {
+  try {
+    const revokedCount = revokeAllUserTokens(req.user.userId);
+    
+    logger.info(`All tokens revoked for user: ${req.user.username}`, {
+      userId: req.user.userId,
+      revokedCount,
+      ip: req.ip
+    });
+    
+    res.json({
+      message: 'All sessions revoked successfully',
+      revokedCount
+    });
+    
+  } catch (error) {
+    logger.error('Token revocation failed:', error);
+    res.status(500).json({
+      error: 'Failed to revoke tokens'
+    });
+  }
 });
 
 /**

@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 const winston = require('winston');
+const { loadSecret } = require('../../../../shared/secrets-loader');
+const { verifyAccessToken } = require('../utils/jwt');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -13,9 +15,11 @@ const logger = winston.createLogger({
  */
 function authenticateToken(req, res, next) {
   try {
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      logger.error('JWT_SECRET not configured');
+    let jwtSecret;
+    try {
+      jwtSecret = loadSecret('JWT_SECRET');
+    } catch (error) {
+      logger.error('JWT_SECRET not configured:', error.message);
       return res.status(500).json({
         error: 'Authentication service misconfigured'
       });
@@ -27,9 +31,9 @@ function authenticateToken(req, res, next) {
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    } else if (req.cookies && req.cookies.authToken) {
-      // Fallback to cookie
-      token = req.cookies.authToken;
+    } else if (req.cookies && req.cookies.accessToken) {
+      // Fallback to access token cookie
+      token = req.cookies.accessToken;
     }
 
     if (!token) {
@@ -39,46 +43,33 @@ function authenticateToken(req, res, next) {
       });
     }
 
-    // Verify token
-    jwt.verify(token, jwtSecret, {
-      issuer: 'audiobook-auth',
-      audience: 'audiobook-app'
-    }, (err, decoded) => {
-      if (err) {
-        logger.warn('Invalid token attempt', {
-          error: err.message,
-          ip: req.ip
-        });
+    // Verify access token using JWT utility
+    const verification = verifyAccessToken(token);
+    
+    if (!verification.valid) {
+      logger.warn('Invalid token attempt', {
+        error: verification.error,
+        ip: req.ip
+      });
 
-        if (err.name === 'TokenExpiredError') {
-          return res.status(401).json({
-            error: 'Token expired',
-            message: 'Please log in again'
-          });
-        }
-
-        if (err.name === 'JsonWebTokenError') {
-          return res.status(401).json({
-            error: 'Invalid token',
-            message: 'Please log in again'
-          });
-        }
-
+      if (verification.error.includes('expired')) {
         return res.status(401).json({
-          error: 'Token verification failed',
-          message: 'Please log in again'
+          error: 'Token expired',
+          message: 'Please refresh your token or log in again',
+          code: 'TOKEN_EXPIRED'
         });
       }
 
-      // Token is valid, add user info to request
-      req.user = {
-        userId: decoded.userId,
-        username: decoded.username,
-        role: decoded.role
-      };
+      return res.status(401).json({
+        error: 'Invalid token',
+        message: 'Please log in again',
+        code: 'TOKEN_INVALID'
+      });
+    }
 
-      next();
-    });
+    // Token is valid, add user info to request
+    req.user = verification.user;
+    next();
 
   } catch (error) {
     logger.error('Authentication middleware error:', error);
@@ -123,8 +114,10 @@ function requireAdmin(req, res, next) {
  */
 function optionalAuth(req, res, next) {
   try {
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
+    let jwtSecret;
+    try {
+      jwtSecret = loadSecret('JWT_SECRET');
+    } catch (error) {
       return next(); // Continue without auth if not configured
     }
 
@@ -133,27 +126,19 @@ function optionalAuth(req, res, next) {
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7);
-    } else if (req.cookies && req.cookies.authToken) {
-      token = req.cookies.authToken;
+    } else if (req.cookies && req.cookies.accessToken) {
+      token = req.cookies.accessToken;
     }
 
     if (!token) {
       return next(); // Continue without auth
     }
 
-    jwt.verify(token, jwtSecret, {
-      issuer: 'audiobook-auth',
-      audience: 'audiobook-app'
-    }, (err, decoded) => {
-      if (!err) {
-        req.user = {
-          userId: decoded.userId,
-          username: decoded.username,
-          role: decoded.role
-        };
-      }
-      next(); // Continue regardless of token validity
-    });
+    const verification = verifyAccessToken(token);
+    if (verification.valid) {
+      req.user = verification.user;
+    }
+    next(); // Continue regardless of token validity
 
   } catch (error) {
     logger.error('Optional auth middleware error:', error);

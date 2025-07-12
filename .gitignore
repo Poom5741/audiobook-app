@@ -3,6 +3,12 @@
 .env.local
 .env.production
 
+# Secrets and security
+secrets/
+*.secret
+*.key.txt
+docker-secrets/
+
 # Dependencies
 node_modules/
 */node_modules/

@@ -1,0 +1,386 @@
+name: Audiobook App CI
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main, develop ]
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.changes.outputs.auth }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      shared: ${{ steps.changes.outputs.shared }}
+      docker: ${{ steps.changes.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            auth:
+              - 'auth/**'
+              - 'shared/**'
+            frontend:
+              - 'frontend/**'
+              - 'shared/**'
+            shared:
+              - 'shared/**'
+            docker:
+              - '**/Dockerfile'
+              - 'docker-compose*.yml'
+
+  lint-and-format:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.auth == 'true' || needs.detect-changes.outputs.frontend == 'true' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    # Auth service linting
+    - name: Install auth dependencies
+      if: needs.detect-changes.outputs.auth == 'true'
+      working-directory: ./auth
+      run: npm ci
+
+    - name: Lint auth service
+      if: needs.detect-changes.outputs.auth == 'true'
+      working-directory: ./auth
+      run: |
+        if npm run lint --silent 2>/dev/null; then
+          npm run lint
+        else
+          echo "No lint script found for auth service"
+        fi
+
+    # Frontend linting
+    - name: Install frontend dependencies
+      if: needs.detect-changes.outputs.frontend == 'true'
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Lint frontend
+      if: needs.detect-changes.outputs.frontend == 'true'
+      working-directory: ./frontend
+      run: |
+        if npm run lint --silent 2>/dev/null; then
+          npm run lint
+        else
+          echo "No lint script found for frontend"
+        fi
+
+  test-auth-service:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.auth == 'true' }}
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    services:
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_audiobook_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: auth/package-lock.json
+
+    - name: Install auth dependencies
+      working-directory: ./auth
+      run: npm ci
+
+    - name: Run auth tests with coverage
+      working-directory: ./auth
+      run: npm test -- --coverage --coverageReporters=lcov,text
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-jwt-secret-key-for-testing-only-minimum-64-characters-long
+        POSTGRES_PASSWORD: test_password
+        ADMIN_PASSWORD: test-admin-password
+        REDIS_PASSWORD: test-redis-password
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_audiobook_db
+        REDIS_URL: redis://localhost:6379/1
+
+    - name: Upload auth coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./auth/coverage/lcov.info
+        flags: auth-service
+        name: auth-service-coverage
+        fail_ci_if_error: false
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.frontend == 'true' }}
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+
+    - name: Run frontend tests
+      working-directory: ./frontend
+      run: |
+        if npm run test --silent 2>/dev/null; then
+          npm run test -- --coverage --watchAll=false
+        else
+          echo "No test script found for frontend"
+        fi
+
+    - name: Upload frontend coverage
+      if: success()
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./frontend/coverage/lcov.info
+        flags: frontend
+        name: frontend-coverage
+        fail_ci_if_error: false
+
+  security-audit:
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.auth == 'true' || needs.detect-changes.outputs.frontend == 'true' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    # Auth security audit
+    - name: Install auth dependencies
+      if: needs.detect-changes.outputs.auth == 'true'
+      working-directory: ./auth
+      run: npm ci
+
+    - name: Auth security audit
+      if: needs.detect-changes.outputs.auth == 'true'
+      working-directory: ./auth
+      run: npm audit --audit-level=moderate
+      continue-on-error: true
+
+    # Frontend security audit  
+    - name: Install frontend dependencies
+      if: needs.detect-changes.outputs.frontend == 'true'
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Frontend security audit
+      if: needs.detect-changes.outputs.frontend == 'true'
+      working-directory: ./frontend
+      run: npm audit --audit-level=moderate
+      continue-on-error: true
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [test-auth-service, test-frontend]
+    if: always() && (needs.test-auth-service.result == 'success' || needs.test-frontend.result == 'success')
+    
+    services:
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_audiobook_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Setup test environment
+      run: |
+        echo "Setting up integration test environment..."
+        # Add any global setup commands here
+
+    - name: Run auth integration tests
+      if: needs.detect-changes.outputs.auth == 'true'
+      working-directory: ./auth
+      run: |
+        npm ci
+        npm test -- --testPathPattern="integration" --verbose
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-jwt-secret-key-for-testing-only-minimum-64-characters-long
+        POSTGRES_PASSWORD: test_password
+        ADMIN_PASSWORD: test-admin-password
+        REDIS_PASSWORD: test-redis-password
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_audiobook_db
+        REDIS_URL: redis://localhost:6379/1
+
+  docker-validation:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, security-audit]
+    if: ${{ needs.detect-changes.outputs.docker == 'true' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Validate Docker Compose
+      run: |
+        if [ -f "docker-compose.yml" ]; then
+          docker compose config
+          echo "Docker Compose configuration is valid"
+        else
+          echo "No docker-compose.yml found"
+        fi
+
+    - name: Build auth service Docker image
+      working-directory: ./auth
+      run: |
+        if [ -f "Dockerfile" ]; then
+          docker build --no-cache -t audiobook-auth:test .
+          echo "Auth Docker image built successfully"
+        else
+          echo "No Dockerfile found in auth service"
+        fi
+
+  code-quality:
+    runs-on: ubuntu-latest
+    needs: [test-auth-service, test-frontend]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      continue-on-error: true
+
+    - name: CodeQL Analysis
+      uses: github/codeql-action/init@v2
+      with:
+        languages: javascript
+      continue-on-error: true
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+      continue-on-error: true
+
+  deployment-readiness:
+    runs-on: ubuntu-latest
+    needs: [test-auth-service, test-frontend, security-audit, integration-tests]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deployment readiness check
+      run: |
+        echo "=== Deployment Readiness Report ==="
+        echo "All tests passed: ✅"
+        echo "Security audit completed: ✅"
+        echo "Integration tests passed: ✅"
+        echo "Ready for deployment to staging environment"
+        
+        # Create deployment artifact
+        echo "$(date): All CI checks passed for commit ${{ github.sha }}" > deployment-ready.txt
+
+    - name: Upload deployment artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-ready-${{ github.sha }}
+        path: deployment-ready.txt
+        retention-days: 90

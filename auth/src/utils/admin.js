@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const winston = require('winston');
+const { loadSecret } = require('../../../../shared/secrets-loader');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -16,10 +17,17 @@ let adminUser = null;
 async function initializeAdmin() {
   try {
     const username = process.env.ADMIN_USERNAME || 'admin';
-    const password = process.env.ADMIN_PASSWORD;
+    
+    let password;
+    try {
+      password = loadSecret('ADMIN_PASSWORD', { required: false });
+    } catch (error) {
+      logger.error('ADMIN_PASSWORD not configured:', error.message);
+      throw new Error('Admin password not configured');
+    }
     
     if (!password) {
-      logger.error('ADMIN_PASSWORD environment variable is required');
+      logger.error('ADMIN_PASSWORD is required but not found');
       throw new Error('Admin password not configured');
     }
 
@@ -178,10 +186,18 @@ function unlockAdminAccount() {
   return { success: false, error: 'Admin user not found' };
 }
 
+// Test utility function to reset admin state
+function resetAdminState() {
+  if (process.env.NODE_ENV === 'test') {
+    adminUser = null;
+  }
+}
+
 module.exports = {
   initializeAdmin,
   validateAdminCredentials,
   getAdminInfo,
   updateAdminPassword,
-  unlockAdminAccount
+  unlockAdminAccount,
+  resetAdminState
 };

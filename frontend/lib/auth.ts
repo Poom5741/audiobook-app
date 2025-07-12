@@ -2,8 +2,8 @@ import axios from 'axios';
 
 const AUTH_API_BASE = process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:8002';
 
-// Check if auth service is disabled
-const AUTH_DISABLED = process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true';
+// Production security: Auth bypass is removed for production builds
+const AUTH_DISABLED = process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true';
 
 const authApi = axios.create({
   baseURL: `${AUTH_API_BASE}/api/auth`,
@@ -26,7 +26,9 @@ export interface User {
 export interface LoginResponse {
   message: string;
   user: User;
-  token: string;
+  accessToken: string;
+  expiresIn: string;
+  tokenType: string;
 }
 
 export interface AuthStatus {
@@ -39,39 +41,36 @@ export interface AuthStatus {
 export const authService = {
   // Login
   async login(username: string, password: string): Promise<LoginResponse> {
-    // If auth is disabled, allow any login
-    if (AUTH_DISABLED) {
+    // Development-only auth bypass (removed in production)
+    if (AUTH_DISABLED && process.env.NODE_ENV === 'development') {
+      console.warn('Development mode: Auth disabled - generating temporary token');
+      const tempToken = `dev-token-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const mockResponse = {
-        message: 'Login successful (auth disabled)',
-        user: { id: 'guest', username: username, role: 'admin' } as User,
-        token: 'mock-token'
+        message: 'Login successful (development mode)',
+        user: { id: 'dev-user', username: username, role: 'admin' } as User,
+        accessToken: tempToken,
+        expiresIn: '1h',
+        tokenType: 'Bearer'
       };
-      localStorage.setItem('authToken', mockResponse.token);
+      localStorage.setItem('accessToken', mockResponse.accessToken);
       return mockResponse;
     }
 
     try {
       const response = await authApi.post('/login', { username, password });
       
-      // Store token in localStorage for API calls
-      if (response.data.token) {
-        localStorage.setItem('authToken', response.data.token);
-        this.setAuthHeader(response.data.token);
+      // Store access token in localStorage for API calls
+      if (response.data.accessToken) {
+        localStorage.setItem('accessToken', response.data.accessToken);
+        this.setAuthHeader(response.data.accessToken);
       }
       
       return response.data;
     } catch (error: any) {
-      // If auth service is unreachable, provide fallback login
+      // Production security: No fallback authentication allowed
       const errorMessage = error.message || '';
       if (errorMessage.includes('Network Error') || errorMessage.includes('timeout') || error.code === 'ECONNREFUSED') {
-        console.warn('Auth service unavailable, using fallback login');
-        const fallbackResponse = {
-          message: 'Login successful (fallback mode)',
-          user: { id: 'fallback', username: username, role: 'admin' } as User,
-          token: 'fallback-token'
-        };
-        localStorage.setItem('authToken', fallbackResponse.token);
-        return fallbackResponse;
+        throw new Error('Authentication service is unavailable. Please try again later or contact support.');
       }
 
       if (error.response?.status === 429) {
@@ -91,7 +90,7 @@ export const authService = {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      localStorage.removeItem('authToken');
+      localStorage.removeItem('accessToken');
       this.clearAuthHeader();
     }
   },
@@ -143,6 +142,47 @@ export const authService = {
     }
   },
 
+  // Refresh access token
+  async refreshToken(): Promise<{ accessToken: string; expiresIn: string; tokenType: string }> {
+    try {
+      const response = await authApi.post('/refresh');
+      
+      if (response.data.accessToken) {
+        localStorage.setItem('accessToken', response.data.accessToken);
+        this.setAuthHeader(response.data.accessToken);
+      }
+      
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        throw new Error('Refresh token expired. Please log in again.');
+      }
+      throw new Error(error.response?.data?.message || 'Token refresh failed');
+    }
+  },
+
+  // Try to refresh token (used internally)
+  async tryRefreshToken(): Promise<{ success: boolean; user?: User }> {
+    try {
+      const refreshResult = await this.refreshToken();
+      const user = await this.getCurrentUser();
+      return { success: true, user };
+    } catch (error) {
+      console.warn('Token refresh failed:', error);
+      return { success: false };
+    }
+  },
+
+  // Revoke all user sessions
+  async revokeAllSessions(): Promise<void> {
+    try {
+      await authApi.post('/revoke-all');
+    } catch (error) {
+      console.error('Revoke all sessions error:', error);
+      throw new Error('Failed to revoke sessions');
+    }
+  },
+
   // Set auth header for API calls
   setAuthHeader(token: string) {
     authApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -155,16 +195,17 @@ export const authService = {
 
   // Initialize auth on app start
   async initializeAuth(): Promise<AuthStatus> {
-    // If auth is disabled, allow access
-    if (AUTH_DISABLED) {
+    // Development-only auth bypass (removed in production)
+    if (AUTH_DISABLED && process.env.NODE_ENV === 'development') {
+      console.warn('Development mode: Auth disabled');
       return { 
         isAuthenticated: true, 
-        user: { id: 'guest', username: 'guest', role: 'admin' } as User, 
+        user: { id: 'dev-user', username: 'developer', role: 'admin' } as User, 
         loading: false 
       };
     }
 
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('accessToken');
     
     if (!token) {
       return { isAuthenticated: false, user: null, loading: false };
@@ -182,18 +223,28 @@ export const authService = {
           loading: false
         };
       } else {
-        // Token invalid, clean up
-        localStorage.removeItem('authToken');
+        // Token invalid, try to refresh
+        const refreshResult = await this.tryRefreshToken();
+        if (refreshResult.success) {
+          return {
+            isAuthenticated: true,
+            user: refreshResult.user!,
+            loading: false
+          };
+        }
+        
+        // Refresh failed, clean up
+        localStorage.removeItem('accessToken');
         this.clearAuthHeader();
         return { isAuthenticated: false, user: null, loading: false };
       }
     } catch (error) {
       console.error('Auth initialization error:', error);
       
-      // If auth service is unreachable, require manual login
+      // Production security: Always require valid authentication
       const errorMessage = (error as any)?.message || '';
       if (errorMessage.includes('Network Error') || errorMessage.includes('timeout')) {
-        console.warn('Auth service unavailable, login required');
+        console.error('Auth service unavailable - authentication required');
         return { 
           isAuthenticated: false, 
           user: null, 
@@ -201,7 +252,7 @@ export const authService = {
         };
       }
       
-      localStorage.removeItem('authToken');
+      localStorage.removeItem('accessToken');
       this.clearAuthHeader();
       return { isAuthenticated: false, user: null, loading: false };
     }
@@ -222,7 +273,7 @@ export function useAuthContext() {
 export function isAuthenticated(): boolean {
   if (typeof window === 'undefined') return false;
   
-  const token = localStorage.getItem('authToken');
+  const token = localStorage.getItem('accessToken');
   return !!token;
 }
 
@@ -230,7 +281,7 @@ export function isAuthenticated(): boolean {
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   
-  return localStorage.getItem('authToken');
+  return localStorage.getItem('accessToken');
 }
 
 // Middleware to add auth header to API calls
@@ -248,8 +299,23 @@ export function addAuthToApi(apiInstance: any) {
     (response: any) => response,
     (error: any) => {
       if (error.response?.status === 401) {
-        // Token expired or invalid
-        localStorage.removeItem('authToken');
+        // Token expired - try to refresh
+        if (error.response?.data?.code === 'TOKEN_EXPIRED') {
+          try {
+            await authService.refreshToken();
+            // Retry the original request
+            const token = localStorage.getItem('accessToken');
+            if (token) {
+              error.config.headers.Authorization = `Bearer ${token}`;
+              return apiInstance.request(error.config);
+            }
+          } catch (refreshError) {
+            console.warn('Auto-refresh failed:', refreshError);
+          }
+        }
+        
+        // Token invalid or refresh failed - clean up and redirect
+        localStorage.removeItem('accessToken');
         authService.clearAuthHeader();
         
         // Redirect to login if on client side
