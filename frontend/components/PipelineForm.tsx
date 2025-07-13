@@ -24,7 +24,7 @@ export default function PipelineForm({ onJobCreated }: PipelineFormProps) {
   const searchParams = useSearchParams();
   
   // Tab state
-  const [activeTab, setActiveTab] = useState<'search' | 'direct'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'direct' | 'upload'>('search');
   
   // Search tab state
   const [query, setQuery] = useState('');
@@ -36,6 +36,9 @@ export default function PipelineForm({ onJobCreated }: PipelineFormProps) {
   const [customTitle, setCustomTitle] = useState('');
   const [customAuthor, setCustomAuthor] = useState('');
   
+  // File upload tab state
+  const [file, setFile] = useState<File | null>(null);
+
   // Common state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +137,38 @@ export default function PipelineForm({ onJobCreated }: PipelineFormProps) {
     }
   };
 
+  const handleFileUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) {
+      setError('Please select a file to upload');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('summarize', String(summarize));
+      formData.append('summaryStyle', summaryStyle);
+
+      const jobId = await pipelineApi.createFromUpload(formData);
+
+      if (jobId) {
+        onJobCreated();
+        setFile(null);
+      } else {
+        setError('Failed to create audiobook from upload');
+      }
+    } catch (err) {
+      setError('Failed to create audiobook from upload');
+      console.error('File upload error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -167,6 +202,18 @@ export default function PipelineForm({ onJobCreated }: PipelineFormProps) {
           >
             <Link className="h-4 w-4" />
             <span>Direct Link</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('upload')}
+            className={`flex-1 flex items-center justify-center space-x-2 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'upload'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <BookOpen className="h-4 w-4" />
+            <span>Upload File</span>
           </button>
         </div>
       </CardHeader>
@@ -425,6 +472,80 @@ export default function PipelineForm({ onJobCreated }: PipelineFormProps) {
                 <>
                   <Link className="h-4 w-4 mr-2" />
                   Download & Create
+                </>
+              )}
+            </Button>
+          </form>
+        )}
+
+        {/* File Upload Tab */}
+        {activeTab === 'upload' && (
+          <form onSubmit={handleFileUploadSubmit} className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Upload Book File
+              </label>
+              <Input
+                type="file"
+                accept=".pdf,.epub,.txt"
+                onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
+                className="w-full"
+              />
+            </div>
+
+            {/* AI Summarization Options - Re-use from Direct Link tab for consistency */}
+            <div className="border-t pt-4">
+              <div className="flex items-center space-x-2 mb-3">
+                <input
+                  type="checkbox"
+                  id="summarize-upload"
+                  checked={summarize}
+                  onChange={(e) => setSummarize(e.target.checked)}
+                  className="rounded border-input"
+                />
+                <label htmlFor="summarize-upload" className="text-sm font-medium cursor-pointer">
+                  🧠 AI Summarization (Extract key insights only)
+                </label>
+              </div>
+              
+              {summarize && (
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Summary Style
+                  </label>
+                  <select
+                    value={summaryStyle}
+                    onChange={(e) => setSummaryStyle(e.target.value as any)}
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background"
+                  >
+                    <option value="concise">Concise (2-3 paragraphs)</option>
+                    <option value="detailed">Detailed (preserves context)</option>
+                    <option value="bullets">Bullet Points (actionable items)</option>
+                    <option value="key-points">Key Points (numbered insights)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    🥥 Extract the "coconut milk" from watery content
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <div className="p-3 bg-destructive/20 text-destructive rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" disabled={loading || !file} className="w-full">
+              {loading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Uploading & Processing...
+                </>
+              ) : (
+                <>
+                  <BookOpen className="h-4 w-4 mr-2" />
+                  Upload & Create
                 </>
               )}
             </Button>

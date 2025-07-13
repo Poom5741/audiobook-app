@@ -1,6 +1,8 @@
 const fs = require('fs-extra');
 const fileType = require('file-type');
-const { logger } = require('../utils/logger');
+const { createLogger } = require('../../shared/logger');
+
+const logger = createLogger('file-detector');
 
 async function detectFileType(filePath) {
   try {
@@ -8,6 +10,7 @@ async function detectFileType(filePath) {
     const extension = filePath.toLowerCase().split('.').pop();
     if (extension === 'pdf') return 'pdf';
     if (extension === 'epub') return 'epub';
+    if (extension === 'txt') return 'txt';
 
     // Use magic bytes detection as fallback
     const type = await fileType.fromFile(filePath);

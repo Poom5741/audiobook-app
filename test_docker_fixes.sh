@@ -74,6 +74,14 @@ else
     echo "Frontend: Incorrect app identity! Fix failed."
 fi
 
+echo "--- Verifying Frontend HTML Content (expecting 'Audiobook App' in page title) ---"
+# Use curl to get the HTML content and check for a specific string
+if curl -s http://localhost:3000 | grep -q "Audiobook App"; then
+    echo "Frontend: HTML content verified (Audiobook App)!"
+else
+    echo "Frontend: Incorrect HTML content! Fix failed (BlockEdge content might still be present)."
+fi
+
 docker stop $CONTAINER_ID || true # Stop container, ignore if already stopped
 docker wait $CONTAINER_ID || true # Wait for container to stop, ignore if already stopped
 

@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fileUpload = require('express-fileupload');
 const { 
   createLogger,
   createExpressLogger,
@@ -35,6 +36,10 @@ app.use(addRequestId);
 app.use(cors());
 app.use(createExpressLogger('crawler-service'));
 app.use(express.json());
+app.use(fileUpload({
+  useTempFiles : true,
+  tempFileDir : './temp-uploads/'
+}));
 
 // Routes
 app.use('/api/search', searchRoutes);

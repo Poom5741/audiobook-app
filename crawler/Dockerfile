@@ -40,13 +40,15 @@ WORKDIR /app
 # Copy application files
 COPY crawler/ .
 
-# Create books directory
-RUN mkdir -p /books
-
 # Add user for security
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001 -G nodejs && \
-    chown -R nextjs:nodejs /app /books
+    adduser -S nextjs -u 1001 -G nodejs
+
+# Create books directory and temp-uploads directory
+RUN mkdir -p /books temp-uploads && \
+    chown -R nextjs:nodejs /app /books temp-uploads
+
+
 
 USER nextjs
 

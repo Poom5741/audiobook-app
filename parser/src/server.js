@@ -23,10 +23,12 @@ logUnhandledErrors('parser-service');
 const { detectFileType } = require('./parsers/detector');
 const { parsePDF } = require('./parsers/pdfParser');
 const { parseEPUB } = require('./parsers/epubParser');
+const { parseTXT } = require('./parsers/txtParser');
 const { cleanText } = require('./processors/textCleaner');
 const { splitIntoChapters } = require('./processors/chapterSplitter');
 const { generateBookSlug } = require('./utils/fileUtils');
 const { saveChaptersToDB, getParsingStats } = require('./services/databaseService');
+const { convertTextToAudio } = require('./services/ttsService');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -40,10 +42,12 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf' || 
         file.mimetype === 'application/epub+zip' ||
-        file.originalname.toLowerCase().endsWith('.epub')) {
+        file.mimetype === 'text/plain' ||
+        file.originalname.toLowerCase().endsWith('.epub') ||
+        file.originalname.toLowerCase().endsWith('.txt')) {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF and EPUB files are allowed'));
+      cb(new Error('Only PDF, EPUB, and TXT files are allowed'));
     }
   }
 });
@@ -226,6 +230,8 @@ async function processFile(filePath, filename, options = {}) {
     extractedData = await parsePDF(filePath);
   } else if (fileType === 'epub') {
     extractedData = await parseEPUB(filePath);
+  } else if (fileType === 'txt') {
+    extractedData = await parseTXT(filePath);
   } else {
     throw new Error(`Unsupported file type: ${fileType}`);
   }
@@ -244,11 +250,21 @@ async function processFile(filePath, filename, options = {}) {
   );
 
   // Split into chapters
-  const chapters = await splitIntoChapters(cleanedData, {
+  let chapters = await splitIntoChapters(cleanedData, {
     method: splitBy,
     chunkSize: parseInt(chunkSize),
     detectChapters: true
   });
+
+  // If no chapters detected, treat the entire text as one chapter
+  if (chapters.length === 0 && cleanedData.text.length > 0) {
+    chapters = [{
+      title: cleanedData.metadata.title || path.parse(filename).name,
+      text: cleanedData.text,
+      wordCount: cleanedData.text.split(/\s+/).filter(Boolean).length,
+      characters: cleanedData.text.length
+    }];
+  }
 
   // Save to output directory
   const outputDir = path.join('./parser/output', bookSlug);
@@ -269,6 +285,17 @@ async function processFile(filePath, filename, options = {}) {
     ].join('\n');
 
     await fs.writeFile(chapterFile, content, 'utf8');
+
+    // Convert text to audio
+    const audioFileName = `chapter-${i + 1}.mp3`;
+    const audioFilePath = path.join(outputDir, audioFileName);
+    try {
+      const ttsAudioPath = await convertTextToAudio(chapter.text, bookSlug, i + 1);
+      chapter.audioPath = ttsAudioPath; // Store relative path from TTS API
+    } catch (ttsError) {
+      logger.error(`Failed to convert chapter ${i + 1} to audio: ${ttsError.message}`);
+      chapter.audioPath = null; // Indicate failure
+    }
   }
 
   // Save metadata
@@ -283,7 +310,8 @@ async function processFile(filePath, filename, options = {}) {
     chapters: chapters.map((ch, i) => ({
       number: i + 1,
       title: ch.title || `Chapter ${i + 1}`,
-      wordCount: ch.wordCount
+      wordCount: ch.wordCount,
+      audioPath: ch.audioPath || null // Include audio path in metadata
     }))
   };
 

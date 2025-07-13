@@ -250,6 +250,20 @@ export const pipelineApi = {
     }
   },
 
+  async createFromUpload(formData: FormData): Promise<string | null> {
+    try {
+      const response = await axios.post('http://localhost:3001/api/pipeline/create-from-upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data.jobId || null;
+    } catch (error) {
+      console.error('Failed to create audiobook from upload:', error);
+      return null;
+    }
+  },
+
   async getPipelineJobs(): Promise<PipelineJob[]> {
     try {
       const response = await axios.get('http://localhost:3001/api/pipeline/jobs');

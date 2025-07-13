@@ -31,7 +31,7 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=${PORT:-5000}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+      - DATABASE_URL=postgresql://audiobook_user:dev-password-123@postgres:5432/audiobook_db
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - JWT_SECRET=${JWT_SECRET:-your-secret-key-here}
       - BOOKS_PATH=/books
@@ -43,9 +43,12 @@ services:
       - books_volume:/books
       - audio_volume:/audio
     depends_on:
-      - postgres
-      - redis
-      - tts-api
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      tts-api:
+        condition: service_started
     networks:
       - audiobook-network
 
@@ -78,16 +81,19 @@ services:
     build:
       context: .
       dockerfile: ./parser/Dockerfile
+      no_cache: true
     container_name: audiobook-parser
+    ports:
+      - "3002:3002"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - BOOKS_PATH=/books
       - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     volumes:
-      - ./parser:/app
-      - /app/node_modules
-      - books_volume:/books
+      - ./parser/src:/app/src
+      - ./books:/books
+      - audio_volume:/audio
     depends_on:
       - postgres
       - redis
@@ -109,7 +115,7 @@ services:
       - AUDIO_PATH=/audio
     volumes:
       - ./tts-api:/app
-      - audio_volume:/audio
+      - ./audio:/audio
       - tts_models:/root/.cache
     networks:
       - audiobook-network
@@ -125,14 +131,19 @@ services:
     ports:
       - "5433:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-audiobook}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-audiobook123}
+      - POSTGRES_USER=audiobook_user
+      - POSTGRES_PASSWORD=dev-password-123
       - POSTGRES_DB=${POSTGRES_DB:-audiobook_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - audiobook-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U audiobook_user -d audiobook_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # Redis for caching and job queue
   redis:

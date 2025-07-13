@@ -6,6 +6,7 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
+const fileUpload = require('express-fileupload');
 
 const { 
   createLogger,
@@ -85,6 +86,10 @@ app.use(compression());
 app.use(requestSizeLimit());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(fileUpload({
+  useTempFiles : true,
+  tempFileDir : './temp-uploads/'
+}));
 
 // Enhanced logging middleware
 app.use(createExpressLogger('backend-service'));
