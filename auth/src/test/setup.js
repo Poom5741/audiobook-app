@@ -191,3 +191,5 @@ jest.mock('winston', () => ({
   }
 }));
 
+// Shared logger mock is handled by moduleNameMapper in jest.config.js
+

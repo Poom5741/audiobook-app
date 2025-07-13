@@ -1,11 +1,25 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs-extra');
-const { logger } = require('./utils/logger');
+const { 
+  createLogger,
+  createExpressLogger,
+  createAuditLogger,
+  createMetricsLogger,
+  addRequestId,
+  logUnhandledErrors
+} = require('../../../shared/logger');
+
+// Logger setup
+const logger = createLogger('parser-service');
+const auditLogger = createAuditLogger('parser-service');
+const metricsLogger = createMetricsLogger('parser-service');
+
+// Setup unhandled error logging
+logUnhandledErrors('parser-service');
 const { detectFileType } = require('./parsers/detector');
 const { parsePDF } = require('./parsers/pdfParser');
 const { parseEPUB } = require('./parsers/epubParser');
@@ -34,9 +48,12 @@ const upload = multer({
   }
 });
 
+// Request ID middleware (should be first)
+app.use(addRequestId);
+
 // Middleware
 app.use(cors());
-app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
+app.use(createExpressLogger('parser-service'));
 app.use(express.json());
 
 // Health check

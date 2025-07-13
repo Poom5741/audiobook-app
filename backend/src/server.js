@@ -7,9 +7,24 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
 
-const { logger } = require('./utils/logger');
+const { 
+  createLogger,
+  createExpressLogger,
+  createAuditLogger,
+  createMetricsLogger,
+  addRequestId,
+  logUnhandledErrors
+} = require('../../../shared/logger');
 const { connectDB } = require('./services/database');
 const { initializeQueue } = require('./services/queueService');
+
+// Logger setup
+const logger = createLogger('backend-service');
+const auditLogger = createAuditLogger('backend-service');
+const metricsLogger = createMetricsLogger('backend-service');
+
+// Setup unhandled error logging
+logUnhandledErrors('backend-service');
 
 // Import routes
 const booksRoutes = require('./routes/books');
@@ -19,14 +34,30 @@ const parsingRoutes = require('./routes/parsing');
 const downloadRoutes = require('./routes/downloads');
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
+const healthRoutes = require('./routes/health');
+
+// Security middleware
+const {
+  securityHeaders,
+  securityLogger,
+  requestSizeLimit,
+  ipAccessControl,
+  fileUploadSecurity,
+  validateSecurityHeaders
+} = require('./middleware/security');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+// Request ID middleware (should be first)
+app.use(addRequestId);
+
+// Enhanced security middleware with CSP
+app.use(securityHeaders());
+app.use(validateSecurityHeaders);
+app.use(securityLogger);
+app.use(requestSizeLimit());
+app.use(ipAccessControl());
 
 // Rate limiting
 const limiter = rateLimit({
@@ -53,23 +84,50 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logging
-app.use(morgan('combined', { 
-  stream: { write: message => logger.info(message.trim()) },
-  skip: (req, res) => req.path === '/health'
-}));
+// Enhanced logging middleware
+app.use(createExpressLogger('backend-service'));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+// Circuit breaker middleware
+const {
+  addCircuitBreakerContext,
+  serviceResilienceMonitoring,
+  circuitBreakerHealthCheck,
+  serviceDependencyCheck,
+  circuitBreakerErrorHandler,
+  createCircuitBreakerAdminRoutes
+} = require('./middleware/circuitBreaker');
+
+app.use(addCircuitBreakerContext);
+app.use(serviceResilienceMonitoring);
+
+// Enhanced health check with circuit breaker and dependency monitoring
+app.get('/health', circuitBreakerHealthCheck, serviceDependencyCheck, (req, res) => {
+  const healthData = {
+    status: 'ok',
     service: 'audiobook-backend',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
+    uptime: process.uptime(),
+    circuitBreakers: req.circuitBreakerHealth,
+    dependencies: req.serviceDependencies
+  };
+
+  // Determine overall health status
+  const isHealthy = req.circuitBreakerHealth.healthy && 
+                   req.serviceDependencies.overall === 'healthy';
+  
+  if (!isHealthy) {
+    healthData.status = 'degraded';
+    return res.status(503).json(healthData);
+  }
+
+  res.json(healthData);
 });
 
+// Circuit breaker admin routes
+app.use('/api/circuit-breaker', createCircuitBreakerAdminRoutes());
+
 // API Routes
+app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/books', booksRoutes);
@@ -77,6 +135,9 @@ app.use('/api/audio', audioRoutes);
 app.use('/api/tts', ttsRoutes);
 app.use('/api/parse', parsingRoutes);
 app.use('/api/downloads', downloadRoutes);
+
+// File upload routes would use fileUploadSecurity middleware:
+// app.use('/api/upload', fileUploadSecurity(), uploadRoutes);
 
 // Static file serving for audio
 app.use('/audio', express.static(process.env.AUDIO_PATH || '/audio', {
@@ -88,6 +149,9 @@ app.use('/audio', express.static(process.env.AUDIO_PATH || '/audio', {
   }
 }));
 
+// Circuit breaker error handling (must come before general error handler)
+app.use(circuitBreakerErrorHandler);
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   logger.error('Unhandled error:', {
@@ -95,15 +159,20 @@ app.use((err, req, res, next) => {
     stack: err.stack,
     url: req.url,
     method: req.method,
-    ip: req.ip
+    ip: req.ip,
+    requestId: req.requestId
   });
 
   if (err.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'Request entity too large' });
+    return res.status(413).json({ 
+      error: 'Request entity too large',
+      requestId: req.requestId 
+    });
   }
 
   res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+    requestId: req.requestId
   });
 });
 

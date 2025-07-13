@@ -1,0 +1,510 @@
+# Network Policies for Audiobook Application
+# These policies implement zero-trust networking within the cluster
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+# Allow frontend to communicate with backend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-backend
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: frontend
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 5000
+  - to:
+    - podSelector:
+        matchLabels:
+          component: auth
+    ports:
+    - protocol: TCP
+      port: 8002
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Allow backend to communicate with databases and microservices
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          component: frontend
+    ports:
+    - protocol: TCP
+      port: 5000
+  # Allow traffic from nginx
+  - from:
+    - podSelector:
+        matchLabels:
+          component: nginx
+    ports:
+    - protocol: TCP
+      port: 5000
+  egress:
+  # Allow access to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          component: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow access to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          component: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow access to microservices
+  - to:
+    - podSelector:
+        matchLabels:
+          component: auth
+    ports:
+    - protocol: TCP
+      port: 8002
+  - to:
+    - podSelector:
+        matchLabels:
+          component: parser
+    ports:
+    - protocol: TCP
+      port: 3002
+  - to:
+    - podSelector:
+        matchLabels:
+          component: crawler
+    ports:
+    - protocol: TCP
+      port: 3001
+  - to:
+    - podSelector:
+        matchLabels:
+          component: tts
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - podSelector:
+        matchLabels:
+          component: summarizer
+    ports:
+    - protocol: TCP
+      port: 8001
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Allow nginx ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-ingress
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: nginx
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow all ingress traffic (from internet)
+  - {}
+  egress:
+  # Allow traffic to frontend
+  - to:
+    - podSelector:
+        matchLabels:
+          component: frontend
+    ports:
+    - protocol: TCP
+      port: 3000
+  # Allow traffic to backend
+  - to:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 5000
+  # Allow traffic to auth service
+  - to:
+    - podSelector:
+        matchLabels:
+          component: auth
+    ports:
+    - protocol: TCP
+      port: 8002
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Database access policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: postgres
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow access from backend
+  - from:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow access from auth service
+  - from:
+    - podSelector:
+        matchLabels:
+          component: auth
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow access from microservices
+  - from:
+    - podSelector:
+        matchLabels:
+          component: parser
+    ports:
+    - protocol: TCP
+      port: 5432
+  - from:
+    - podSelector:
+        matchLabels:
+          component: crawler
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow access from monitoring
+  - from:
+    - podSelector:
+        matchLabels:
+          component: postgres-exporter
+    ports:
+    - protocol: TCP
+      port: 5432
+---
+# Redis cache access policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: redis
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow access from backend
+  - from:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow access from auth service
+  - from:
+    - podSelector:
+        matchLabels:
+          component: auth
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow access from monitoring
+  - from:
+    - podSelector:
+        matchLabels:
+          component: redis-exporter
+    ports:
+    - protocol: TCP
+      port: 6379
+---
+# Microservices communication policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: microservices-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      app: audiobook
+      component: auth
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow access from backend
+  - from:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 8002
+  # Allow access from nginx
+  - from:
+    - podSelector:
+        matchLabels:
+          component: nginx
+    ports:
+    - protocol: TCP
+      port: 8002
+  egress:
+  # Allow access to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          component: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow access to Redis
+  - to:
+    - podSelector:
+        matchLabels:
+          component: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Parser service policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: parser-service-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: parser
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow access from backend
+  - from:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 3002
+  egress:
+  # Allow access to PostgreSQL
+  - to:
+    - podSelector:
+        matchLabels:
+          component: postgres
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# TTS service policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tts-service-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: tts
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow access from backend
+  - from:
+    - podSelector:
+        matchLabels:
+          component: backend
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  # Allow access to summarizer if needed
+  - to:
+    - podSelector:
+        matchLabels:
+          component: summarizer
+    ports:
+    - protocol: TCP
+      port: 8001
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Monitoring access policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: prometheus
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow access from grafana
+  - from:
+    - podSelector:
+        matchLabels:
+          component: grafana
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow scraping from all services
+  - to:
+    - podSelector:
+        matchLabels:
+          app: audiobook
+    ports:
+    - protocol: TCP
+      port: 5000  # backend metrics
+    - protocol: TCP
+      port: 3000  # frontend metrics
+    - protocol: TCP
+      port: 8002  # auth metrics
+    - protocol: TCP
+      port: 3002  # parser metrics
+    - protocol: TCP
+      port: 3001  # crawler metrics
+    - protocol: TCP
+      port: 8000  # tts metrics
+    - protocol: TCP
+      port: 8001  # summarizer metrics
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Logging access policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: logging-access
+  namespace: audiobook
+  labels:
+    app: audiobook
+spec:
+  podSelector:
+    matchLabels:
+      component: elasticsearch
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow access from logstash
+  - from:
+    - podSelector:
+        matchLabels:
+          component: logstash
+    ports:
+    - protocol: TCP
+      port: 9200
+  # Allow access from kibana
+  - from:
+    - podSelector:
+        matchLabels:
+          component: kibana
+    ports:
+    - protocol: TCP
+      port: 9200
+  # Allow access from filebeat
+  - from:
+    - podSelector:
+        matchLabels:
+          component: filebeat
+    ports:
+    - protocol: TCP
+      port: 9200

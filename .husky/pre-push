@@ -1,0 +1,54 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🚀 Running pre-push hooks..."
+
+# Get the branch being pushed
+protected_branch='master|main|develop'
+current_branch=$(git symbolic-ref HEAD | sed -e 's,.*/\(.*\),\1,')
+
+echo "📋 Pushing to branch: $current_branch"
+
+# Run comprehensive checks for protected branches
+if echo "$current_branch" | grep -qE "$protected_branch"; then
+  echo "🔒 Protected branch detected, running comprehensive checks..."
+  
+  # Check for merge conflicts markers
+  if git grep -q -E "^(<{7}|={7}|>{7}) " HEAD; then
+    echo "❌ Merge conflict markers found in files!"
+    echo "Please resolve all merge conflicts before pushing."
+    exit 1
+  fi
+  
+  # Check for debug statements
+  if git grep -q -iE "(console\.log|debugger|TODO:|FIXME:|XXX:)" HEAD -- "*.js" "*.ts"; then
+    echo "⚠️  Debug statements or TODO items found:"
+    git grep -n -iE "(console\.log|debugger|TODO:|FIXME:|XXX:)" HEAD -- "*.js" "*.ts" | head -5
+    echo ""
+    echo "Consider removing debug statements before pushing to $current_branch"
+    # Don't exit, just warn for now
+  fi
+  
+  # Run tests if auth service has changes
+  if git diff --name-only HEAD~1 HEAD | grep -q "^auth/"; then
+    echo "🧪 Auth service changes detected, running tests..."
+    cd auth && npm test -- --passWithNoTests
+    if [ $? -ne 0 ]; then
+      echo "❌ Auth service tests failed!"
+      exit 1
+    fi
+    cd ..
+  fi
+  
+  # Check for secrets in committed files
+  echo "🔍 Scanning for potential secrets..."
+  if git diff --name-only HEAD~1 HEAD | xargs grep -iE "(password|secret|key|token)" | grep -vE "\.test\.|\.spec\.|README|example|template"; then
+    echo "⚠️  Potential secrets found in committed files"
+    echo "Please review the above findings and ensure no real secrets are committed"
+    # Don't exit, just warn
+  fi
+  
+  echo "✅ Protected branch checks completed"
+fi
+
+echo "✅ Pre-push hooks completed successfully!"

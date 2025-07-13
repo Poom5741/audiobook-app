@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audiobook-config
+  namespace: audiobook
+  labels:
+    app: audiobook
+data:
+  # Database configuration
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "audiobook_db"
+  DB_POOL_MAX: "20"
+  DB_POOL_MIN: "5"
+  DB_ACQUIRE_TIMEOUT: "60000"
+  
+  # Redis configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_KEY_PREFIX: "audiobook:"
+  
+  # Service URLs
+  FRONTEND_URL: "http://frontend-service:3000"
+  BACKEND_URL: "http://backend-service:5000"
+  AUTH_SERVICE_URL: "http://auth-service:8002"
+  PARSER_SERVICE_URL: "http://parser-service:3002"
+  CRAWLER_SERVICE_URL: "http://crawler-service:3001"
+  TTS_API_URL: "http://tts-service:8000"
+  SUMMARIZER_API_URL: "http://summarizer-service:8001"
+  
+  # Logging
+  LOG_LEVEL: "info"
+  ENABLE_FILE_LOGGING: "true"
+  
+  # Environment
+  NODE_ENV: "production"
+  
+  # Circuit Breaker Configuration
+  CIRCUIT_BREAKER_TIMEOUT_AUTH: "3000"
+  CIRCUIT_BREAKER_TIMEOUT_PARSER: "10000"
+  CIRCUIT_BREAKER_TIMEOUT_CRAWLER: "15000"
+  CIRCUIT_BREAKER_TIMEOUT_TTS: "30000"
+  CIRCUIT_BREAKER_ERROR_THRESHOLD: "50"
+  CIRCUIT_BREAKER_RESET_TIMEOUT: "30000"
+  
+  # Storage paths (using persistent volumes)
+  BOOKS_PATH: "/data/books"
+  AUDIO_PATH: "/data/audio"
+  LOGS_DIR: "/data/logs"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: audiobook
+  labels:
+    app: audiobook
+    component: nginx
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+    
+    http {
+        upstream backend {
+            server backend-service:5000;
+        }
+        
+        upstream frontend {
+            server frontend-service:3000;
+        }
+        
+        upstream auth {
+            server auth-service:8002;
+        }
+        
+        server {
+            listen 80;
+            server_name _;
+            
+            # Security headers
+            add_header X-Frame-Options DENY;
+            add_header X-Content-Type-Options nosniff;
+            add_header X-XSS-Protection "1; mode=block";
+            
+            # Frontend routes
+            location / {
+                proxy_pass http://frontend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+            
+            # Backend API routes
+            location /api/ {
+                proxy_pass http://backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                client_max_body_size 100M;
+            }
+            
+            # Auth service routes
+            location /auth/ {
+                proxy_pass http://auth;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+            
+            # Audio file serving
+            location /audio/ {
+                proxy_pass http://backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header Range $http_range;
+                proxy_set_header If-Range $http_if_range;
+                proxy_no_cache 1;
+                proxy_cache_bypass 1;
+            }
+            
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+        }
+    }

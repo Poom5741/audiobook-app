@@ -1,9 +1,23 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
-const { logger } = require('./utils/logger');
+const { 
+  createLogger,
+  createExpressLogger,
+  createAuditLogger,
+  createMetricsLogger,
+  addRequestId,
+  logUnhandledErrors
+} = require('../../../shared/logger');
 const { connectDB } = require('./db/connection');
+
+// Logger setup
+const logger = createLogger('crawler-service');
+const auditLogger = createAuditLogger('crawler-service');
+const metricsLogger = createMetricsLogger('crawler-service');
+
+// Setup unhandled error logging
+logUnhandledErrors('crawler-service');
 const searchRoutes = require('./routes/search');
 const downloadRoutes = require('./routes/download');
 const queueRoutes = require('./routes/queue');
@@ -14,14 +28,18 @@ const { initializeQueue } = require('./services/queueManager');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Request ID middleware (should be first)
+app.use(addRequestId);
+
 // Middleware
 app.use(cors());
-app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
+app.use(createExpressLogger('crawler-service'));
 app.use(express.json());
 
 // Routes
 app.use('/api/search', searchRoutes);
 app.use('/api/download', downloadRoutes);
+app.use('/api/downloads', downloadRoutes); // Also support /downloads for compatibility
 app.use('/api/queue', queueRoutes);
 app.use('/api/auto', autoRoutes);
 app.use('/api/pipeline', pipelineRoutes);

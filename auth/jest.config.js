@@ -40,7 +40,8 @@ module.exports = {
   
   // Module mapping for mocks
   moduleNameMapper: {
-    '^../../../../shared/secrets-loader$': '<rootDir>/src/test/__mocks__/secrets-loader.js'
+    '^../../../../shared/secrets-loader$': '<rootDir>/src/test/__mocks__/secrets-loader.js',
+    '^../../../../shared/logger$': '<rootDir>/src/test/__mocks__/logger.js'
   },
   
   // Specific timeout for auth tests (they involve crypto operations)

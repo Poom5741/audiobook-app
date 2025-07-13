@@ -1,0 +1,43 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Validating commit message..."
+
+# Read the commit message
+commit_message=$(cat "$1")
+
+# Check if commit message follows conventional commit format
+# Allowed types: feat, fix, docs, style, refactor, test, chore, ci, security
+conventional_pattern="^(feat|fix|docs|style|refactor|test|chore|ci|security)(\(.+\))?!?: .+"
+
+if echo "$commit_message" | grep -qE "$conventional_pattern"; then
+  echo "✅ Commit message follows conventional commit format"
+elif echo "$commit_message" | grep -qE "^(🚀|🔧|🧪|🛡️|📚|🎨|♻️|🚧|⚡|🐛|✨|💄|🔒|📦|🏷️|🔥|💚|👷|📈|🩹|🎯|🚨|🙈|📝|🔀|📌|⬆️|⬇️|📦|👽|🚚|📄|💡|🍻|💬|🗃️|🔊|🔇|📱|🤡|🥚|🙈|📸|⚗️|🔍|🏷️|🌐|♿|💬|🗃️|🔈|🔊|📱|🤡|🥚|🙈|📸|⚗️|🔍|🏷️|🌐|♿|💬|🗃️|📱|🤡|🥚|🙈|📸|⚗️|🔍|🏷️|🌐|♿)"; then
+  echo "✅ Commit message uses emoji convention"
+elif echo "$commit_message" | grep -qE "^(WIP|HOTFIX|BREAKING|Merge|Revert)"; then
+  echo "✅ Commit message uses special convention"
+else
+  echo "❌ Commit message should follow one of these formats:"
+  echo ""
+  echo "Conventional Commits:"
+  echo "  feat: add new feature"
+  echo "  fix: bug fix"
+  echo "  docs: documentation changes"
+  echo "  style: formatting changes"
+  echo "  refactor: code refactoring"
+  echo "  test: adding or updating tests"
+  echo "  chore: maintenance tasks"
+  echo "  ci: CI/CD changes"
+  echo "  security: security improvements"
+  echo ""
+  echo "Or Emoji Commits:"
+  echo "  ✨ feat: new feature"
+  echo "  🐛 fix: bug fix"
+  echo "  📚 docs: documentation"
+  echo "  🔧 chore: maintenance"
+  echo ""
+  echo "Current message: $commit_message"
+  exit 1
+fi
+
+echo "✅ Commit message validation passed!"

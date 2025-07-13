@@ -2,17 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../services/database');
 const { logger } = require('../utils/logger');
-const { validateRequest } = require('../middleware/validation');
+const { validateRequest, validateSearchBooks, validateUploadBook, validateUpdateBook } = require('../middleware/validation');
+const { cacheBookList, cacheBook, cacheBookProgress, invalidateBookCache, cacheMiddleware } = require('../middleware/cache');
+const { TTL } = require('../services/cacheService');
 const { param, query } = require('express-validator');
 
 // GET /api/books - List all books
 router.get('/', 
-  validateRequest([
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    query('offset').optional().isInt({ min: 0 }).toInt(),
-    query('status').optional().isIn(['downloaded', 'parsed', 'generating', 'ready']),
-    query('search').optional().isLength({ min: 1, max: 100 })
-  ]),
+  validateSearchBooks,
+  cacheBookList,
   async (req, res) => {
     try {
       const { limit = 20, offset = 0, status, search } = req.query;
@@ -82,6 +80,7 @@ router.get('/:id',
   validateRequest([
     param('id').isUUID()
   ]),
+  cacheBook,
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -140,6 +139,7 @@ router.get('/:id/chapters',
     param('id').isUUID(),
     query('includeText').optional().isBoolean().toBoolean()
   ]),
+  cacheBookProgress,
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -186,7 +186,9 @@ router.get('/:id/chapters',
 );
 
 // GET /api/books/stats - Get overall statistics
-router.get('/stats', async (req, res) => {
+router.get('/stats', 
+  cacheMiddleware({ ttl: TTL.MEDIUM, keyGenerator: () => 'books:stats' }),
+  async (req, res) => {
   try {
     const statsQuery = `
       SELECT 
@@ -222,6 +224,7 @@ router.delete('/:id',
   validateRequest([
     param('id').isUUID()
   ]),
+  invalidateBookCache,
   async (req, res) => {
     try {
       const { id } = req.params;

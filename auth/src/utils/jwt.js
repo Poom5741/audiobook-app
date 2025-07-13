@@ -102,8 +102,8 @@ function refreshAccessToken(refreshToken, userAgent = null, ipAddress = null) {
     
     // Update last used timestamp
     tokenData.lastUsed = Date.now();
-    if (userAgent) tokenData.userAgent = userAgent;
-    if (ipAddress) tokenData.ipAddress = ipAddress;
+    if (userAgent) {tokenData.userAgent = userAgent;}
+    if (ipAddress) {tokenData.ipAddress = ipAddress;}
     
     // Generate new access token
     const user = {

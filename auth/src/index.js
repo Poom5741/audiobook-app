@@ -1,7 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const winston = require('winston');
+const { 
+  createLogger,
+  createExpressLogger,
+  createAuditLogger,
+  createMetricsLogger,
+  addRequestId,
+  logUnhandledErrors
+} = require('../../../shared/logger');
 const { 
   createRateLimitMiddleware, 
   detectSuspiciousActivity,
@@ -15,30 +22,12 @@ const authRoutes = require('./routes/auth');
 const { initializeAdmin } = require('./utils/admin');
 
 // Logger setup
-const logger = winston.createLogger({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.simple()
-    }),
-    new winston.transports.File({ 
-      filename: 'logs/auth-error.log', 
-      level: 'error',
-      maxsize: 5242880,
-      maxFiles: 5
-    }),
-    new winston.transports.File({ 
-      filename: 'logs/auth-combined.log',
-      maxsize: 5242880,
-      maxFiles: 5
-    })
-  ]
-});
+const logger = createLogger('auth-service');
+const auditLogger = createAuditLogger('auth-service');
+const metricsLogger = createMetricsLogger('auth-service');
+
+// Setup unhandled error logging
+logUnhandledErrors('auth-service');
 
 // Enhanced rate limiting middlewares
 const generalRateLimit = createRateLimitMiddleware('general');
@@ -52,6 +41,9 @@ const trustedIPMiddleware = createTrustedIPMiddleware(trustedIPs);
 
 const app = express();
 const PORT = process.env.PORT || 8002;
+
+// Request ID middleware (should be first)
+app.use(addRequestId);
 
 // Security middleware
 app.use(helmet({
@@ -137,29 +129,22 @@ app.use((req, res, next) => {
 
 // Enhanced rate limiting for specific endpoints
 app.use('/api/auth/login', (req, res, next) => {
-  if (req.trustedIP) return next();
+  if (req.trustedIP) {return next();}
   loginRateLimit(req, res, next);
 });
 
 app.use('/api/auth/change-password', (req, res, next) => {
-  if (req.trustedIP) return next();
+  if (req.trustedIP) {return next();}
   passwordChangeRateLimit(req, res, next);
 });
 
 app.use('/api/auth/refresh', (req, res, next) => {
-  if (req.trustedIP) return next();
+  if (req.trustedIP) {return next();}
   tokenRefreshRateLimit(req, res, next);
 });
 
-// Logging middleware
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    userAgent: req.get('User-Agent'),
-    timestamp: new Date().toISOString()
-  });
-  next();
-});
+// Enhanced logging middleware
+app.use(createExpressLogger('auth-service'));
 
 // Health check
 app.get('/health', (req, res) => {

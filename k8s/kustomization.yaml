@@ -1,0 +1,80 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: audiobook-app
+  namespace: audiobook
+
+# Common labels applied to all resources
+commonLabels:
+  app: audiobook
+  version: v1.0.0
+  
+# Common annotations
+commonAnnotations:
+  deployment.kubernetes.io/revision: "1"
+  app.kubernetes.io/managed-by: kustomize
+
+# Namespace for all resources
+namespace: audiobook
+
+# Resources to deploy
+resources:
+- namespace.yaml
+- configmap.yaml
+- secrets.yaml
+- storage.yaml
+- postgres.yaml
+- redis.yaml
+- backend.yaml
+- frontend.yaml
+- microservices.yaml
+- nginx.yaml
+
+# Optional resources (comment out if not needed)
+# - monitoring.yaml
+# - logging.yaml
+
+# Images to use (update with your registry)
+images:
+- name: audiobook/backend
+  newTag: latest
+- name: audiobook/frontend
+  newTag: latest
+- name: audiobook/auth
+  newTag: latest
+- name: audiobook/parser
+  newTag: latest
+- name: audiobook/crawler
+  newTag: latest
+- name: audiobook/tts
+  newTag: latest
+- name: audiobook/summarizer
+  newTag: latest
+
+# ConfigMap generator for environment-specific configs
+configMapGenerator:
+- name: deployment-info
+  literals:
+  - deployment.environment=production
+  - deployment.timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+  - deployment.version=v1.0.0
+
+# Secret generator (use with caution in CI/CD)
+# secretGenerator:
+# - name: app-secrets
+#   literals:
+#   - database-password=<generated-password>
+
+# Patches for environment-specific customizations
+# patchesStrategicMerge:
+# - patches/production-resources.yaml
+
+# JSON patches for fine-grained modifications
+# patchesJson6902:
+# - target:
+#     group: apps
+#     version: v1
+#     kind: Deployment
+#     name: backend
+#   path: patches/backend-replicas.yaml
