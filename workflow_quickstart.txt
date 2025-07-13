@@ -1,0 +1,29 @@
+CLAUDE-GEMINI WORKFLOW QUICK REFERENCE
+=====================================
+
+STEP 1: Run Claude Analysis
+./claude_workflow.sh "Your audit prompt here"
+
+STEP 2: Run Gemini Recheck (copy command shown after Claude finishes)
+gemini -p "Recheck claude_summary.txt and refactored_code.py..."
+
+COMMON PROMPTS:
+---------------
+Security Audit:
+./claude_workflow.sh "Audit tts-api/ for security vulnerabilities, focus on input validation and API security. Generate refactored_code.py"
+
+Performance Check:
+./claude_workflow.sh "Analyze backend/ and tts-api/ for performance issues. Generate optimized code in refactored_code.py"
+
+Full Audit:
+./claude_workflow.sh "Audit ~/codingZone/buildSomething/audiobook/audiobook-app for bugs, deprecated APIs, and performance issues. Generate refactored_code.py and commit_message.txt"
+
+GENERATED FILES:
+----------------
+- claude_output.txt (full output)
+- claude_summary.txt (auto-summary for Gemini)
+- refactored_code.py (if requested)
+- commit_message.txt (if requested)
+- improved_code.py (from Gemini)
+
+TOKEN SAVINGS: ~90% (20-30K vs 300K tokens)

@@ -281,4 +281,42 @@ router.delete('/:bookId/:chapterId',
   }
 );
 
+// GET /api/audio/files - List all audio files
+router.get('/files', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        c.id, c.title, c.audio_path, c.duration, c.chapter_number,
+        b.id as book_id, b.title as book_title, b.author
+      FROM chapters c
+      JOIN books b ON c.book_id = b.id
+      WHERE c.audio_path IS NOT NULL
+      ORDER BY b.title, c.chapter_number
+    `;
+    
+    const result = await pool.query(query);
+    
+    const files = result.rows.map(row => ({
+      id: row.id,
+      bookId: row.book_id,
+      chapterNumber: row.chapter_number,
+      title: row.title,
+      bookTitle: row.book_title,
+      author: row.author,
+      audioPath: row.audio_path,
+      duration: row.duration,
+      url: `/api/audio/${row.book_id}/${row.id}`
+    }));
+    
+    res.json({
+      files,
+      total: files.length
+    });
+    
+  } catch (error) {
+    logger.error('List audio files error:', error);
+    res.status(500).json({ error: 'Failed to list audio files' });
+  }
+});
+
 module.exports = router;

@@ -1,0 +1,74 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/audiobook/*-combined.log
+  fields:
+    service_type: application
+    log_type: combined
+  fields_under_root: true
+  json.keys_under_root: true
+  json.add_error_key: true
+
+- type: log
+  enabled: true
+  paths:
+    - /var/log/audiobook/*-error.log
+  fields:
+    service_type: application
+    log_type: error
+  fields_under_root: true
+  json.keys_under_root: true
+  json.add_error_key: true
+
+- type: log
+  enabled: true
+  paths:
+    - /var/log/audiobook/*-audit.log
+  fields:
+    service_type: audit
+    log_type: audit
+  fields_under_root: true
+  json.keys_under_root: true
+  json.add_error_key: true
+
+- type: log
+  enabled: true
+  paths:
+    - /var/log/audiobook/*-metrics.log
+  fields:
+    service_type: metrics
+    log_type: metrics
+  fields_under_root: true
+  json.keys_under_root: true
+  json.add_error_key: true
+
+- type: docker
+  enabled: true
+  containers.ids:
+    - "*"
+  containers.path: "/var/lib/docker/containers"
+  containers.stream: "all"
+  processors:
+    - add_docker_metadata:
+        host: "unix:///var/run/docker.sock"
+
+processors:
+- add_host_metadata:
+    when.not.contains.tags: forwarded
+- add_cloud_metadata: ~
+- add_docker_metadata: ~
+- add_kubernetes_metadata: ~
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+monitoring.enabled: false
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat.log
+  keepfiles: 7
+  permissions: 0644

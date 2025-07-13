@@ -65,6 +65,31 @@ class AudioProcessor:
             logger.error(f"Error copying audio: {e}")
             raise
     
+    async def get_duration(self, audio_path: Path) -> float:
+        """Get audio file duration in seconds"""
+        try:
+            if not audio_path.exists():
+                return 0.0
+                
+            # Try to get duration with ffprobe
+            cmd = [
+                'ffprobe', '-v', 'quiet',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                str(audio_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+            else:
+                logger.warning(f"Could not get duration for {audio_path}")
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"Error getting audio duration: {e}")
+            return 0.0
+
     async def get_audio_info(self, file_path: Path) -> dict:
         """Get basic audio file information"""
         try:
@@ -72,19 +97,7 @@ class AudioProcessor:
                 return {"duration": 0, "size": 0}
                 
             size = file_path.stat().st_size
-            
-            # Try to get duration with ffprobe
-            try:
-                cmd = [
-                    'ffprobe', '-v', 'quiet',
-                    '-show_entries', 'format=duration',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    str(file_path)
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                duration = float(result.stdout.strip()) if result.returncode == 0 else 0
-            except:
-                duration = 0
+            duration = await self.get_duration(file_path)
                 
             return {
                 "duration": duration,

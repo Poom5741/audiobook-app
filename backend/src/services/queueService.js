@@ -2,23 +2,88 @@ const Bull = require('bull');
 const axios = require('axios');
 const path = require('path');
 const fs = require('fs-extra');
-const { logger } = require('../utils/logger');
+const { createLogger, createMetricsLogger } = require('../../shared/logger');
 const { updateChapterStatus, updateBookStatus, getBookProgress } = require('./database');
+const { serviceHelpers, callService } = require('../utils/circuitBreaker');
+
+const logger = createLogger('queue-service');
+const metricsLogger = createMetricsLogger('queue-service');
 
 let ttsQueue;
 
+// Enhanced retry configurations for different job types
+const retryConfigs = {
+  tts: {
+    attempts: 5,
+    backoff: {
+      type: 'exponential',
+      delay: 10000, // Start with 10 seconds
+      settings: {
+        factor: 2.5,
+        maxDelay: 600000 // Max 10 minutes
+      }
+    },
+    removeOnComplete: 100,
+    removeOnFail: 50
+  },
+  summarization: {
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 5000,
+      settings: {
+        factor: 2,
+        maxDelay: 300000 // Max 5 minutes
+      }
+    },
+    removeOnComplete: 50,
+    removeOnFail: 25
+  },
+  parsing: {
+    attempts: 4,
+    backoff: {
+      type: 'exponential',
+      delay: 8000,
+      settings: {
+        factor: 3,
+        maxDelay: 480000 // Max 8 minutes
+      }
+    },
+    removeOnComplete: 75,
+    removeOnFail: 30
+  },
+  download: {
+    attempts: 6,
+    backoff: {
+      type: 'exponential',
+      delay: 15000,
+      settings: {
+        factor: 2,
+        maxDelay: 900000 // Max 15 minutes
+      }
+    },
+    removeOnComplete: 50,
+    removeOnFail: 40
+  }
+};
+
 async function initializeQueue() {
-  // Initialize TTS queue
+  // Initialize TTS queue with enhanced retry configuration
   ttsQueue = new Bull('tts-generation', {
     redis: process.env.REDIS_URL,
     defaultJobOptions: {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000
-      },
-      removeOnComplete: 50,
-      removeOnFail: 20
+      ...retryConfigs.tts,
+      // Add job timeout
+      timeout: 600000, // 10 minutes timeout per job
+      // Add job TTL
+      ttl: 3600000, // Jobs expire after 1 hour if not processed
+      // Add delay for failed jobs
+      delay: 0
+    },
+    settings: {
+      stalledInterval: 30 * 1000, // Check for stalled jobs every 30 seconds
+      maxStalledCount: 1, // Max number of times a job can stall before failing
+      retryProcessDelay: 5000 // Delay before retrying failed job processing
     }
   });
 
@@ -46,30 +111,56 @@ async function initializeQueue() {
 
       let processedText = text;
       
-      // Summarize text if enabled
+      // Summarize text if enabled using circuit breaker
       if (summarize) {
         logger.info(`Summarizing text for chapter: ${title}`);
         
         try {
           const summarizerApiUrl = process.env.SUMMARIZER_API_URL || 'http://localhost:8001';
-          const summarizeResponse = await axios.post(`${summarizerApiUrl}/api/summarize`, {
-            text: text,
-            style: summarizeOptions.style || 'concise',
-            maxLength: summarizeOptions.maxLength || 500,
-            contentType: summarizeOptions.contentType || 'narrative'
-          }, {
-            timeout: 60000 // 1 minute timeout for summarization
-          });
+          
+          // Use circuit breaker for summarization service
+          const summarizeResponse = await callService('summarizer', {
+            url: `${summarizerApiUrl}/api/summarize`,
+            method: 'POST',
+            data: {
+              text: text,
+              style: summarizeOptions.style || 'concise',
+              maxLength: summarizeOptions.maxLength || 500,
+              contentType: summarizeOptions.contentType || 'narrative'
+            },
+            timeout: 60000
+          }, { retries: 2 }); // Fewer retries for summarization
           
           if (summarizeResponse.data && summarizeResponse.data.summary) {
             processedText = summarizeResponse.data.summary;
             logger.info(`Text summarized: ${text.length} → ${processedText.length} chars (${summarizeResponse.data.compressionRatio}% compression)`);
+            
+            // Log summarization metrics
+            metricsLogger.logBusinessMetric('text_summarization', 1, {
+              originalLength: text.length,
+              summaryLength: processedText.length,
+              compressionRatio: summarizeResponse.data.compressionRatio,
+              chapterId,
+              bookId
+            });
           } else {
             logger.warn('Summarization response was empty, using original text');
           }
         } catch (summaryError) {
-          logger.error('Summarization failed, using original text:', summaryError.message);
+          logger.error('Summarization failed via circuit breaker, using original text', {
+            error: summaryError.message,
+            statusCode: summaryError.statusCode,
+            chapterId,
+            attempt: job.attemptsMade
+          });
+          
           // Continue with original text if summarization fails
+          metricsLogger.logBusinessMetric('summarization_failure', 1, {
+            error: summaryError.message,
+            chapterId,
+            bookId,
+            attempt: job.attemptsMade
+          });
         }
       }
 
@@ -85,7 +176,7 @@ async function initializeQueue() {
         throw new Error('No valid text content for TTS generation');
       }
 
-      // Call TTS API
+      // Call TTS API using circuit breaker
       await job.progress(30);
       
       const ttsApiUrl = process.env.TTS_API_URL;
@@ -93,17 +184,21 @@ async function initializeQueue() {
         throw new Error('TTS_API_URL not configured');
       }
 
-      const ttsResponse = await axios.post(`${ttsApiUrl}/tts`, {
-        text: cleanedText,
-        title: `${bookTitle} - ${title}`,
-        voice: voice,
-        model: model,
-        chapter_id: chapterId,
-        book_id: bookId
-      }, {
+      // Use circuit breaker for TTS service
+      const ttsResponse = await callService('tts', {
+        url: `${ttsApiUrl}/tts`,
+        method: 'POST',
+        data: {
+          text: cleanedText,
+          title: `${bookTitle} - ${title}`,
+          voice: voice,
+          model: model,
+          chapter_id: chapterId,
+          book_id: bookId
+        },
         timeout: 300000, // 5 minutes
         responseType: 'stream'
-      });
+      }, { retries: 1 }); // Limited retries for TTS due to long processing time
 
       await job.progress(60);
 
@@ -119,7 +214,13 @@ async function initializeQueue() {
       const writeStream = fs.createWriteStream(audioPath);
       
       let totalSize = 0;
-      ttsResponse.data.on('data', (chunk) => {
+      
+      // Handle stream response from circuit breaker
+      const responseStream = ttsResponse.data instanceof require('stream').Readable ? 
+        ttsResponse.data : 
+        require('stream').Readable.from(Buffer.from(ttsResponse.data));
+      
+      responseStream.on('data', (chunk) => {
         totalSize += chunk.length;
         // Update progress based on data received (rough estimate)
         const progress = Math.min(60 + (totalSize / 1000000) * 20, 80);
@@ -127,10 +228,20 @@ async function initializeQueue() {
       });
 
       await new Promise((resolve, reject) => {
-        ttsResponse.data.pipe(writeStream);
+        responseStream.pipe(writeStream);
         writeStream.on('finish', resolve);
         writeStream.on('error', reject);
-        ttsResponse.data.on('error', reject);
+        responseStream.on('error', reject);
+      });
+
+      // Log TTS generation metrics
+      metricsLogger.logBusinessMetric('tts_generation_success', 1, {
+        chapterId,
+        bookId,
+        textLength: cleanedText.length,
+        voice,
+        model,
+        duration: ttsResponse.duration || 0
       });
 
       await job.progress(90);
@@ -174,7 +285,24 @@ async function initializeQueue() {
       };
 
     } catch (error) {
-      logger.error(`TTS generation failed for chapter ${chapterId}:`, error);
+      logger.error(`TTS generation failed for chapter ${chapterId}:`, {
+        error: error.message,
+        statusCode: error.statusCode,
+        chapterId,
+        bookId,
+        attempt: job.attemptsMade,
+        service: error.service || 'unknown'
+      });
+      
+      // Log failure metrics with circuit breaker context
+      metricsLogger.logBusinessMetric('tts_generation_failure', 1, {
+        error: error.message,
+        statusCode: error.statusCode,
+        chapterId,
+        bookId,
+        attempt: job.attemptsMade,
+        service: error.service || 'tts'
+      });
       
       // Update chapter status to failed
       await updateChapterStatus(chapterId, 'failed');

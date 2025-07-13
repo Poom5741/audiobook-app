@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: audiobook
+  labels:
+    app: audiobook
+    environment: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: audiobook-dev
+  labels:
+    app: audiobook
+    environment: development
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: audiobook-staging
+  labels:
+    app: audiobook
+    environment: staging

@@ -1,3 +1,5 @@
+const { verifyAccessToken } = require('../utils/jwt');
+
 // Tests for authentication middleware
 
 const { 
@@ -5,6 +7,9 @@ const {
   requireAdmin, 
   optionalAuth 
 } = require('../auth');
+
+// Mock the jwt module at the top level
+jest.mock('../utils/jwt');
 
 describe('Authentication Middleware', () => {
   let req, res, next;
@@ -22,6 +27,9 @@ describe('Authentication Middleware', () => {
       const token = global.authTestUtils.createTestToken();
       req.headers.authorization = `Bearer ${token}`;
       
+      // Ensure the mock is reset for this test
+      verifyAccessToken.mockImplementationOnce(() => ({ userId: 'test-user-id', username: 'testuser', role: 'admin' }));
+
       await authenticateToken(req, res, next);
       
       expect(req.user).toEqual({
@@ -36,6 +44,9 @@ describe('Authentication Middleware', () => {
     it('should authenticate valid token from cookies', async () => {
       const token = global.authTestUtils.createTestToken();
       req.cookies = { accessToken: token };
+
+      // Ensure the mock is reset for this test
+      verifyAccessToken.mockImplementationOnce(() => ({ userId: 'test-user-id', username: 'testuser', role: 'admin' }));
       
       await authenticateToken(req, res, next);
       
@@ -53,6 +64,9 @@ describe('Authentication Middleware', () => {
       
       req.headers.authorization = `Bearer ${headerToken}`;
       req.cookies = { accessToken: cookieToken };
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => ({ userId: 'header-user-id', username: 'header-user', role: 'admin' }));
       
       await authenticateToken(req, res, next);
       
@@ -73,6 +87,9 @@ describe('Authentication Middleware', () => {
 
     it('should reject request with invalid token', async () => {
       req.headers.authorization = 'Bearer invalid.token.here';
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => { throw new Error('Invalid token'); });
       
       await authenticateToken(req, res, next);
       
@@ -88,6 +105,13 @@ describe('Authentication Middleware', () => {
     it('should reject expired token with specific code', async () => {
       const expiredToken = global.authTestUtils.createExpiredToken();
       req.headers.authorization = `Bearer ${expiredToken}`;
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => { 
+        const error = new Error('Token expired');
+        error.name = 'TokenExpiredError';
+        throw error;
+      });
       
       await authenticateToken(req, res, next);
       
@@ -103,6 +127,13 @@ describe('Authentication Middleware', () => {
     it('should reject refresh token when expecting access token', async () => {
       const refreshToken = global.authTestUtils.createTestRefreshToken();
       req.headers.authorization = `Bearer ${refreshToken}`;
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => { 
+        const error = new Error('Invalid token');
+        error.name = 'JsonWebTokenError';
+        throw error;
+      });
       
       await authenticateToken(req, res, next);
       
@@ -133,11 +164,9 @@ describe('Authentication Middleware', () => {
 
     it('should handle unexpected errors gracefully', async () => {
       // Mock verifyAccessToken to throw unexpected error
-      jest.doMock('../utils/jwt', () => ({
-        verifyAccessToken: jest.fn(() => {
-          throw new Error('Unexpected error');
-        })
-      }));
+      verifyAccessToken.mockImplementationOnce(() => {
+        throw new Error('Unexpected error');
+      });
       
       const token = global.authTestUtils.createTestToken();
       req.headers.authorization = `Bearer ${token}`;
@@ -201,6 +230,9 @@ describe('Authentication Middleware', () => {
     it('should add user info when valid token provided', async () => {
       const token = global.authTestUtils.createTestToken();
       req.headers.authorization = `Bearer ${token}`;
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => ({ userId: 'test-user-id', username: 'testuser', role: 'admin' }));
       
       await optionalAuth(req, res, next);
       
@@ -223,6 +255,9 @@ describe('Authentication Middleware', () => {
 
     it('should continue without user when invalid token provided', async () => {
       req.headers.authorization = 'Bearer invalid.token';
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => { throw new Error('Invalid token'); });
       
       await optionalAuth(req, res, next);
       
@@ -248,6 +283,9 @@ describe('Authentication Middleware', () => {
     it('should use cookie token when no header provided', async () => {
       const token = global.authTestUtils.createTestToken();
       req.cookies = { accessToken: token };
+
+      // Mock for this specific test
+      verifyAccessToken.mockImplementationOnce(() => ({ userId: 'test-user-id', username: 'testuser', role: 'admin' }));
       
       await optionalAuth(req, res, next);
       
@@ -265,11 +303,9 @@ describe('Authentication Middleware', () => {
       req.headers.authorization = `Bearer ${token}`;
       
       // Mock verifyAccessToken to throw error
-      jest.doMock('../utils/jwt', () => ({
-        verifyAccessToken: jest.fn(() => {
-          throw new Error('Unexpected verification error');
-        })
-      }));
+      verifyAccessToken.mockImplementationOnce(() => {
+        throw new Error('Unexpected verification error');
+      });
       
       await optionalAuth(req, res, next);
       

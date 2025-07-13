@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: audiobook-books-pv
+  labels:
+    app: audiobook
+    type: books
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: audiobook-storage
+  nfs:
+    # Replace with your NFS server details
+    server: nfs-server.example.com
+    path: /data/audiobook/books
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: audiobook-audio-pv
+  labels:
+    app: audiobook
+    type: audio
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: audiobook-storage
+  nfs:
+    # Replace with your NFS server details
+    server: nfs-server.example.com
+    path: /data/audiobook/audio
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: audiobook-logs-pv
+  labels:
+    app: audiobook
+    type: logs
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: audiobook-storage
+  nfs:
+    # Replace with your NFS server details
+    server: nfs-server.example.com
+    path: /data/audiobook/logs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: books-pvc
+  namespace: audiobook
+  labels:
+    app: audiobook
+    type: books
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: audiobook-storage
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audio-pvc
+  namespace: audiobook
+  labels:
+    app: audiobook
+    type: audio
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: audiobook-storage
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs-pvc
+  namespace: audiobook
+  labels:
+    app: audiobook
+    type: logs
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: audiobook-storage
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: audiobook
+  labels:
+    app: audiobook
+    component: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: audiobook
+  labels:
+    app: audiobook
+    component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

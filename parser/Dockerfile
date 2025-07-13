@@ -2,14 +2,26 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package.json and package-lock.json
+COPY parser/package.json ./
+COPY parser/package-lock.json ./
 
 # Install dependencies
-RUN npm ci --omit=dev --prefer-offline && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
+
+# Copy the rest of the parser application files
+COPY parser/ ./
+
+# Copy shared modules to /app/shared
+RUN mkdir -p ./shared
+COPY shared/ ./shared/
+# Install shared module dependencies
+WORKDIR ./shared
+RUN npm install --production
+WORKDIR /app
 
 # Copy application files
-COPY . .
+COPY parser/ .
 
 # Create necessary directories and set permissions
 RUN mkdir -p output temp-uploads && \

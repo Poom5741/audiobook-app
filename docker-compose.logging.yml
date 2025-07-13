@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # Elasticsearch for log storage
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: audiobook-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - audiobook-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Logstash for log processing
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: audiobook-logstash
+    volumes:
+      - ./logging/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logging/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - logs_volume:/var/log/audiobook:ro
+    ports:
+      - "5044:5044"
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    networks:
+      - audiobook-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  # Kibana for log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: audiobook-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: ""
+      ELASTICSEARCH_PASSWORD: ""
+    networks:
+      - audiobook-network
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Filebeat for log shipping
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.11.0
+    container_name: audiobook-filebeat
+    user: root
+    volumes:
+      - ./logging/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - logs_volume:/var/log/audiobook:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["--strict.perms=false"]
+    networks:
+      - audiobook-network
+    depends_on:
+      - elasticsearch
+      - logstash
+
+  # Fluentd as alternative log aggregator
+  fluentd:
+    image: fluent/fluentd:v1.16-1
+    container_name: audiobook-fluentd
+    volumes:
+      - ./logging/fluentd/conf:/fluentd/etc
+      - logs_volume:/var/log/audiobook:ro
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    networks:
+      - audiobook-network
+    depends_on:
+      - elasticsearch
+
+volumes:
+  elasticsearch_data:
+    driver: local
+  logs_volume:
+    driver: local
+
+networks:
+  audiobook-network:
+    external: true

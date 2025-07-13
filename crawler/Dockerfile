@@ -19,7 +19,7 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 # Dependencies stage
 FROM base AS deps
 WORKDIR /app
-COPY package*.json ./
+COPY crawler/package*.json ./
 RUN npm ci --omit=dev --prefer-offline && npm cache clean --force
 
 # Production stage
@@ -28,15 +28,27 @@ WORKDIR /app
 
 # Copy dependencies
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 
-# Create books directory
-RUN mkdir -p /books
+# Copy shared modules to /app/shared
+RUN mkdir -p ./shared
+COPY shared/ ./shared/
+# Install shared module dependencies
+WORKDIR ./shared
+RUN npm install --production
+WORKDIR /app
+
+# Copy application files
+COPY crawler/ .
 
 # Add user for security
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001 -G nodejs && \
-    chown -R nextjs:nodejs /app /books
+    adduser -S nextjs -u 1001 -G nodejs
+
+# Create books directory and temp-uploads directory
+RUN mkdir -p /books temp-uploads && \
+    chown -R nextjs:nodejs /app /books temp-uploads
+
+
 
 USER nextjs
 

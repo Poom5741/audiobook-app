@@ -1,22 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../services/database');
-const { logger } = require('../utils/logger');
-const { validateRequest } = require('../middleware/validation');
+const { createLogger } = require('../../shared/logger');
+const { validateRequest, validateGenerateTTS, validateBookTTSGeneration } = require('../middleware/validation');
+const { cacheTTSQueue, invalidateBookCache, cacheMiddleware } = require('../middleware/cache');
+const { TTL } = require('../services/cacheService');
 const { param, body } = require('express-validator');
 const { addTTSJob, getTTSQueue } = require('../services/queueService');
-const axios = require('axios');
+const { serviceHelpers } = require('../utils/circuitBreaker');
+
+const logger = createLogger('tts-routes');
 
 // POST /api/tts/generate/:bookId - Generate audio for entire book
 router.post('/generate/:bookId',
-  validateRequest([
-    param('bookId').isUUID(),
-    body('voice').optional().isString(),
-    body('model').optional().isIn(['bark', 'tortoise']),
-    body('priority').optional().isInt({ min: 0, max: 10 }),
-    body('summarize').optional().isBoolean(),
-    body('summarizeOptions').optional().isObject()
-  ]),
+  validateBookTTSGeneration,
+  invalidateBookCache,
   async (req, res) => {
     try {
       const { bookId } = req.params;
@@ -251,7 +249,9 @@ router.get('/queue/status', async (req, res) => {
 });
 
 // GET /api/tts/queue/jobs - Get TTS queue jobs
-router.get('/queue/jobs', async (req, res) => {
+router.get('/queue/jobs', 
+  cacheTTSQueue,
+  async (req, res) => {
   try {
     const { status = 'active', limit = 20 } = req.query;
     const queue = getTTSQueue();
@@ -293,8 +293,10 @@ router.get('/queue/jobs', async (req, res) => {
   }
 });
 
-// GET /api/tts/models - Get available TTS models and voices
-router.get('/models', async (req, res) => {
+// GET /api/tts/models - Get available TTS models and voices via circuit breaker
+router.get('/models', 
+  cacheMiddleware({ ttl: TTL.VERY_LONG, keyGenerator: () => 'tts:models' }),
+  async (req, res) => {
   try {
     const ttsApiUrl = process.env.TTS_API_URL;
     
@@ -307,26 +309,85 @@ router.get('/models', async (req, res) => {
     }
     
     try {
-      // Try to get models from TTS API
-      const response = await axios.get(`${ttsApiUrl}/models`, {
+      // Use circuit breaker for TTS service call
+      const result = await req.circuitBreaker.callService('tts', {
+        url: `${ttsApiUrl}/models`,
+        method: 'GET',
         timeout: 5000
       });
       
-      res.json(response.data);
+      logger.info('Successfully fetched TTS models via circuit breaker', {
+        modelCount: result.data?.models?.length || 0,
+        duration: result.duration,
+        requestId: req.requestId
+      });
+      
+      res.json(result.data);
       
     } catch (apiError) {
-      logger.warn('TTS API not available, returning defaults:', apiError.message);
+      logger.warn('TTS API not available via circuit breaker, returning defaults', {
+        error: apiError.message,
+        statusCode: apiError.statusCode,
+        requestId: req.requestId
+      });
       
       res.json({
         models: ['bark', 'tortoise'],
         voices: ['default', 'male', 'female'],
-        note: 'TTS API not available, showing defaults'
+        note: 'TTS API not available, showing defaults',
+        error: apiError.message
       });
     }
     
   } catch (error) {
     logger.error('Get TTS models error:', error);
-    res.status(500).json({ error: 'Failed to get TTS models' });
+    res.status(500).json({ 
+      error: 'Failed to get TTS models',
+      requestId: req.requestId
+    });
+  }
+});
+
+// GET /api/tts/voices - Get available TTS voices through circuit breaker
+router.get('/voices', 
+  cacheMiddleware({ ttl: TTL.VERY_LONG, keyGenerator: () => 'tts:voices' }),
+  async (req, res) => {
+  try {
+    logger.info('Fetching TTS voices via circuit breaker', {
+      requestId: req.requestId
+    });
+
+    const result = await serviceHelpers.tts.getVoices();
+    
+    logger.info('Successfully fetched TTS voices', {
+      voiceCount: result.data?.voices?.length || 0,
+      duration: result.duration,
+      requestId: req.requestId
+    });
+
+    res.json({
+      voices: result.data.voices || [],
+      service: 'tts',
+      duration: result.duration,
+      requestId: req.requestId
+    });
+
+  } catch (error) {
+    logger.error('Failed to fetch TTS voices via circuit breaker', {
+      error: error.message,
+      statusCode: error.statusCode,
+      service: error.service,
+      requestId: req.requestId
+    });
+
+    // Provide fallback response when TTS service is unavailable
+    res.status(error.statusCode || 503).json({
+      error: 'TTS service unavailable',
+      message: 'Unable to fetch voices. Service may be experiencing issues.',
+      fallbackVoices: ['default', 'male', 'female'],
+      service: 'tts',
+      requestId: req.requestId
+    });
   }
 });
 

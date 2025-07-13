@@ -1,7 +1,11 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
-const winston = require('winston');
+const { 
+  createLogger, 
+  createAuditLogger, 
+  createMetricsLogger 
+} = require('../../../../shared/logger');
 
 const { validateAdminCredentials, getAdminInfo, updateAdminPassword } = require('../utils/admin');
 const { authenticateToken } = require('../middleware/auth');
@@ -10,11 +14,9 @@ const { generateTokenPair, refreshAccessToken, revokeRefreshToken, revokeAllUser
 
 const router = express.Router();
 
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.simple(),
-  transports: [new winston.transports.Console()]
-});
+const logger = createLogger('auth-routes');
+const auditLogger = createAuditLogger('auth-routes');
+const metricsLogger = createMetricsLogger('auth-routes');
 
 // Validation schemas
 const loginSchema = Joi.object({
@@ -48,6 +50,14 @@ router.post('/login', async (req, res) => {
     const result = await validateAdminCredentials(username, password);
     
     if (!result.success) {
+      auditLogger.logSecurityEvent('login_failed', 'medium', {
+        username,
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        requestId: req.requestId,
+        reason: result.error
+      });
+      
       return res.status(401).json({
         error: 'Authentication failed',
         message: result.error
@@ -82,9 +92,22 @@ router.post('/login', async (req, res) => {
       path: '/api/auth/refresh' // Restrict refresh token to refresh endpoint
     });
 
+    auditLogger.logActivity('login_success', result.user.id, {
+      username,
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+      requestId: req.requestId
+    });
+
+    metricsLogger.logBusinessMetric('user_login', 1, {
+      userId: result.user.id,
+      username
+    });
+
     logger.info(`Successful login for user: ${username}`, {
       userId: result.user.id,
-      ip: req.ip
+      ip: req.ip,
+      requestId: req.requestId
     });
 
     res.json({
@@ -124,9 +147,17 @@ router.post('/logout', authenticateToken, (req, res) => {
   res.clearCookie('accessToken');
   res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
   
+  auditLogger.logActivity('logout', req.user?.userId, {
+    username: req.user?.username,
+    ip: req.ip,
+    userAgent: req.get('User-Agent'),
+    requestId: req.requestId
+  });
+
   logger.info(`User logged out: ${req.user?.username}`, {
     userId: req.user?.userId,
-    ip: req.ip
+    ip: req.ip,
+    requestId: req.requestId
   });
 
   res.json({

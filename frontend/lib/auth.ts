@@ -166,7 +166,7 @@ export const authService = {
     try {
       const refreshResult = await this.refreshToken();
       const user = await this.getCurrentUser();
-      return { success: true, user };
+      return { success: true, user: user || undefined };
     } catch (error) {
       console.warn('Token refresh failed:', error);
       return { success: false };
@@ -297,7 +297,7 @@ export function addAuthToApi(apiInstance: any) {
   // Handle 401 responses
   apiInstance.interceptors.response.use(
     (response: any) => response,
-    (error: any) => {
+    async (error: any) => {
       if (error.response?.status === 401) {
         // Token expired - try to refresh
         if (error.response?.data?.code === 'TOKEN_EXPIRED') {

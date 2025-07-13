@@ -4,6 +4,70 @@ const axios = require('axios');
 const { logger } = require('../utils/logger');
 const { validateRequest } = require('../middleware/validation');
 const { body, param } = require('express-validator');
+const fs = require('fs-extra');
+const path = require('path');
+
+// POST /api/parse/upload - Upload a file for parsing
+router.post('/upload', async (req, res) => {
+  try {
+    if (!req.files || Object.keys(req.files).length === 0) {
+      return res.status(400).json({ error: 'No files were uploaded.' });
+    }
+
+    const uploadedFile = req.files.file; // 'file' is the name of the input field in the form
+    const { summarize = 'false', summaryStyle = 'concise' } = req.body;
+
+    // Move the file to a temporary location accessible by the parser service
+    const tempUploadsDir = process.env.TEMP_UPLOADS_DIR || path.join(__dirname, '../../temp-uploads');
+    await fs.ensureDir(tempUploadsDir);
+    const tempFilePath = path.join(tempUploadsDir, uploadedFile.name);
+    await uploadedFile.mv(tempFilePath);
+
+    const parserApiUrl = process.env.PARSER_API_URL || 'http://parser:3002';
+
+    // Forward the file to the parser service
+    const parseResponse = await axios.post(`${parserApiUrl}/api/parse/file`, {
+      filePath: tempFilePath,
+      options: {
+        summarize: summarize === 'true',
+        summaryStyle,
+        saveToDb: true
+      }
+    }, {
+      timeout: 300000 // 5 minutes
+    });
+
+    // Clean up temp file
+    await fs.remove(tempFilePath);
+
+    res.json({
+      message: 'File uploaded and sent to parser successfully',
+      result: parseResponse.data
+    });
+
+  } catch (error) {
+    logger.error('File upload parsing failed:', error);
+
+    // Clean up temp file on error
+    if (req.files && req.files.file) {
+      const uploadedFile = req.files.file;
+      const tempFilePath = process.env.TEMP_UPLOADS_DIR || path.join(__dirname, '../../temp-uploads', uploadedFile.name);
+      await fs.remove(tempFilePath).catch(() => {});
+    }
+
+    if (error.code === 'ECONNREFUSED') {
+      return res.status(503).json({ 
+        error: 'Parser service unavailable',
+        message: 'The parsing service is not running'
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'File upload parsing failed', 
+      message: error.response?.data?.message || error.message 
+    });
+  }
+});
 
 // POST /api/parse/book/:bookId - Parse a downloaded book
 router.post('/book/:bookId',

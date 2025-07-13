@@ -1,0 +1,9 @@
+{
+  "name": "audiobook-shared",
+  "version": "1.0.0",
+  "description": "Shared modules for audiobook services",
+  "dependencies": {
+    "winston": "^3.11.0",
+    "path": "^0.12.7"
+  }
+}

@@ -1,0 +1,192 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: audiobook
+  labels:
+    app: audiobook
+    component: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audiobook
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: audiobook
+        component: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_DB
+        - name: PGDATA
+          value: "/var/lib/postgresql/data/pgdata"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - audiobook
+            - -d
+            - audiobook_db
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - audiobook
+            - -d
+            - audiobook_db
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+      - name: init-scripts
+        configMap:
+          name: postgres-init
+          defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: audiobook
+  labels:
+    app: audiobook
+    component: postgres
+spec:
+  selector:
+    app: audiobook
+    component: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: audiobook
+  labels:
+    app: audiobook
+    component: postgres
+data:
+  init.sql: |
+    -- Create database schema
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    
+    -- Users table
+    CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Books table
+    CREATE TABLE IF NOT EXISTS books (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        title VARCHAR(255) NOT NULL,
+        author VARCHAR(255),
+        isbn VARCHAR(20),
+        file_path VARCHAR(500),
+        file_type VARCHAR(10),
+        language VARCHAR(10) DEFAULT 'en',
+        total_chapters INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'uploaded',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Chapters table
+    CREATE TABLE IF NOT EXISTS chapters (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        book_id UUID REFERENCES books(id) ON DELETE CASCADE,
+        chapter_number INTEGER NOT NULL,
+        title VARCHAR(255),
+        text_content TEXT,
+        audio_path VARCHAR(500),
+        audio_duration INTEGER,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Reading progress table
+    CREATE TABLE IF NOT EXISTS reading_progress (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        book_id UUID REFERENCES books(id) ON DELETE CASCADE,
+        chapter_id UUID REFERENCES chapters(id) ON DELETE CASCADE,
+        position INTEGER DEFAULT 0,
+        completed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, book_id, chapter_id)
+    );
+    
+    -- Download queue table
+    CREATE TABLE IF NOT EXISTS download_queue (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        url VARCHAR(1000) NOT NULL,
+        title VARCHAR(255),
+        author VARCHAR(255),
+        isbn VARCHAR(20),
+        status VARCHAR(20) DEFAULT 'pending',
+        file_path VARCHAR(500),
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Create indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_books_status ON books(status);
+    CREATE INDEX IF NOT EXISTS idx_chapters_book_id ON chapters(book_id);
+    CREATE INDEX IF NOT EXISTS idx_chapters_status ON chapters(status);
+    CREATE INDEX IF NOT EXISTS idx_reading_progress_user_book ON reading_progress(user_id, book_id);
+    CREATE INDEX IF NOT EXISTS idx_download_queue_status ON download_queue(status);
+    
+    -- Insert default admin user (password: admin123)
+    INSERT INTO users (email, password_hash, role) 
+    VALUES ('admin@audiobook.com', '$2b$10$8K1p/8eY.r3Z.9K7M/8QzOXc3Y1Y.2Z8J9H6K.1L/5A4B3C.7D9E0F', 'admin')
+    ON CONFLICT (email) DO NOTHING;

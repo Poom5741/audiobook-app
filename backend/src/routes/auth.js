@@ -4,19 +4,15 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../services/database');
 const { logger } = require('../utils/logger');
-const { validateRequest } = require('../middleware/validation');
+const { validateRequest, validateLogin, validateRegister } = require('../middleware/validation');
 const { body } = require('express-validator');
 
 // POST /api/auth/register - Register new user
 router.post('/register',
-  validateRequest([
-    body('username').isLength({ min: 3, max: 50 }).trim(),
-    body('email').isEmail().normalizeEmail(),
-    body('password').isLength({ min: 6, max: 100 })
-  ]),
+  validateRegister,
   async (req, res) => {
     try {
-      const { username, email, password } = req.body;
+      const { name: username, email, password } = req.body;
       
       // Check if user already exists
       const existingUser = await pool.query(
@@ -74,18 +70,15 @@ router.post('/register',
 
 // POST /api/auth/login - Login user
 router.post('/login',
-  validateRequest([
-    body('username').isLength({ min: 1 }),
-    body('password').isLength({ min: 1 })
-  ]),
+  validateLogin,
   async (req, res) => {
     try {
-      const { username, password } = req.body;
+      const { email, password } = req.body;
       
       // Find user
       const result = await pool.query(
         'SELECT id, username, email, password_hash FROM users WHERE username = $1 OR email = $1',
-        [username]
+        [email]
       );
       
       if (result.rows.length === 0) {
