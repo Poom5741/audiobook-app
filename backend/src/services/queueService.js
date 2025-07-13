@@ -2,7 +2,7 @@ const Bull = require('bull');
 const axios = require('axios');
 const path = require('path');
 const fs = require('fs-extra');
-const { createLogger, createMetricsLogger } = require('../../../../shared/logger');
+const { createLogger, createMetricsLogger } = require('../../shared/logger');
 const { updateChapterStatus, updateBookStatus, getBookProgress } = require('./database');
 const { serviceHelpers, callService } = require('../utils/circuitBreaker');
 

@@ -1,7 +1,7 @@
 const { validationResult } = require('express-validator');
 const Joi = require('joi');
 const { z } = require('zod');
-const { createLogger } = require('../../../../shared/logger');
+const { createLogger } = require('../../shared/logger');
 
 const logger = createLogger('validation');
 

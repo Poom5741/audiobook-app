@@ -53,100 +53,119 @@ describe('Security Middleware', () => {
   });
 
   describe('Request Size Limiting', () => {
-    test('should reject requests that exceed size limit', async () => {
-      console.log('Running request size limit test');
-      app.use(requestSizeLimit({ maxBodySize: '1kb' }));
-      app.post('/test', (req, res) => res.json({ status: 'ok' }));
+    let mockReq, mockRes, next;
 
-      const largePayload = 'x'.repeat(2000); // 2KB payload
-
-      await request(app)
-        .post('/test')
-        .set('Content-Length', '2048') // Explicitly set content length
-        .send({ data: largePayload })
-        .expect(413);
+    beforeEach(() => {
+      mockReq = {
+        headers: {},
+        get: jest.fn((header) => {
+          if (header === 'content-length') return mockReq.headers['content-length'];
+          if (header === 'content-type') return mockReq.headers['content-type'];
+          return undefined;
+        }),
+        originalUrl: '/test',
+        ip: '127.0.0.1',
+        requestId: 'test-req-id'
+      };
+      mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      next = jest.fn();
     });
 
-    test('should allow requests within size limit', async () => {
-      app.use(requestSizeLimit({ maxBodySize: '10mb' }));
-      app.post('/test', (req, res) => res.json({ status: 'ok' }));
-
-      await request(app)
-        .post('/test')
-        .send({ data: 'small payload' })
-        .expect(200);
+    test('should reject requests that exceed size limit', () => {
+      mockReq.headers['content-length'] = '2048'; // 2KB
+      const middleware = requestSizeLimit({ maxBodySize: '1kb' });
+      middleware(mockReq, mockRes, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(413);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'Request size too large',
+        maxSize: '1kb'
+      });
     });
 
-    test('should allow requests with no content-length header', async () => {
-      app.use(requestSizeLimit({ maxBodySize: '1kb' }));
-      app.post('/test', (req, res) => res.json({ status: 'ok' }));
+    test('should allow requests within size limit', () => {
+      mockReq.headers['content-length'] = '500'; // 0.5KB
+      const middleware = requestSizeLimit({ maxBodySize: '1kb' });
+      middleware(mockReq, mockRes, next);
+      expect(next).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
 
-      await request(app)
-        .post('/test')
-        .send({ data: 'small' })
-        .expect(200);
+    test('should allow requests with no content-length header', () => {
+      const middleware = requestSizeLimit({ maxBodySize: '1kb' });
+      middleware(mockReq, mockRes, next);
+      expect(next).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    test('should reject files exceeding size limit', () => {
+      mockReq.headers['content-length'] = String(200 * 1024 * 1024); // 200MB
+      mockReq.headers['content-type'] = 'multipart/form-data';
+      const middleware = requestSizeLimit({ maxFileSize: '100mb' });
+      middleware(mockReq, mockRes, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(413);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: 'Request size too large',
+        maxSize: '100mb'
+      });
     });
   });
 
   describe('IP Access Control', () => {
-    test('should allow whitelisted IPs', async () => {
-      app.use((req, res, next) => {
-        req.ip = '127.0.0.1'; // Mock IP for testing
-        next();
-      });
-      app.use(ipAccessControl({ 
-        whitelist: ['127.0.0.1'], 
-        enabled: true 
-      }));
-      app.get('/test', (req, res) => res.json({ status: 'ok' }));
+    let mockReq, mockRes, next;
 
-      await request(app)
-        .get('/test')
-        .expect(200);
+    beforeEach(() => {
+      mockReq = {
+        ip: '127.0.0.1',
+        connection: { remoteAddress: '127.0.0.1' },
+        socket: { remoteAddress: '127.0.0.1' },
+        headers: {},
+        originalUrl: '/test',
+        get: jest.fn((header) => {
+          if (header === 'User-Agent') return 'test-agent';
+          return undefined;
+        })
+      };
+      mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      };
+      next = jest.fn();
     });
 
-    test('should block non-whitelisted IPs when whitelist is configured', async () => {
-      app.use((req, res, next) => {
-        req.ip = '192.168.1.100'; // Mock different IP
-        next();
-      });
-      app.use(ipAccessControl({ 
-        whitelist: ['192.168.1.1'], 
-        enabled: true 
-      }));
-      app.get('/test', (req, res) => res.json({ status: 'ok' }));
-
-      await request(app)
-        .get('/test')
-        .expect(403);
+    test('should allow whitelisted IPs', () => {
+      const middleware = ipAccessControl({ whitelist: ['127.0.0.1'], enabled: true });
+      middleware(mockReq, mockRes, next);
+      expect(next).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
     });
 
-    test('should block blacklisted IPs', async () => {
-      app.use((req, res, next) => {
-        req.ip = '127.0.0.1'; // Mock IP for testing
-        next();
-      });
-      app.use(ipAccessControl({ 
-        blacklist: ['127.0.0.1'], 
-        enabled: true 
-      }));
-      app.get('/test', (req, res) => res.json({ status: 'ok' }));
-
-      await request(app)
-        .get('/test')
-        .expect(403);
+    test('should block non-whitelisted IPs when whitelist is configured', () => {
+      mockReq.ip = '192.168.1.100';
+      const middleware = ipAccessControl({ whitelist: ['192.168.1.1'], enabled: true });
+      middleware(mockReq, mockRes, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Access denied' });
     });
 
-    test('should pass through when disabled', async () => {
-      app.use(ipAccessControl({ 
-        blacklist: ['127.0.0.1'], 
-        enabled: false 
-      }));
-      app.get('/test', (req, res) => res.json({ status: 'ok' }));
+    test('should block blacklisted IPs', () => {
+      const middleware = ipAccessControl({ blacklist: ['127.0.0.1'], enabled: true });
+      middleware(mockReq, mockRes, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(403);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Access denied' });
+    });
 
-      await request(app)
-        .get('/test')
-        .expect(200);
+    test('should pass through when disabled', () => {
+      const middleware = ipAccessControl({ blacklist: ['127.0.0.1'], enabled: false });
+      middleware(mockReq, mockRes, next);
+      expect(next).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
     });
   });
 

@@ -11,7 +11,7 @@ const {
   createMetricsLogger,
   addRequestId,
   logUnhandledErrors
-} = require('../../../shared/logger');
+} = require('../shared/logger');
 
 // Logger setup
 const logger = createLogger('parser-service');

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../services/database');
-const { createLogger } = require('../../../../shared/logger');
+const { createLogger } = require('../../shared/logger');
 const { validateRequest, validateGenerateTTS, validateBookTTSGeneration } = require('../middleware/validation');
 const { cacheTTSQueue, invalidateBookCache, cacheMiddleware } = require('../middleware/cache');
 const { TTL } = require('../services/cacheService');

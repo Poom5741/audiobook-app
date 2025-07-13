@@ -1,5 +1,5 @@
 const { callService, healthCheck, getCircuitBreakerStats, bulkHealthCheck } = require('../utils/circuitBreaker');
-const { createLogger, createAuditLogger } = require('../../../../shared/logger');
+const { createLogger, createAuditLogger } = require('../../shared/logger');
 
 const logger = createLogger('circuit-breaker-middleware');
 const auditLogger = createAuditLogger('circuit-breaker-middleware');

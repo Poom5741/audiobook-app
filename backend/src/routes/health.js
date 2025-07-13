@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { cacheService } = require('../services/cacheService');
 const { healthCheck } = require('../services/database');
-const { createLogger } = require('../../../../shared/logger');
+const { createLogger } = require('../../shared/logger');
 
 const logger = createLogger('health');
 

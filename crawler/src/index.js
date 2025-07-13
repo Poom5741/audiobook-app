@@ -8,7 +8,7 @@ const {
   createMetricsLogger,
   addRequestId,
   logUnhandledErrors
-} = require('../../../shared/logger');
+} = require('../shared/logger');
 const { connectDB } = require('./db/connection');
 
 // Logger setup

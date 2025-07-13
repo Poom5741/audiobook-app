@@ -1,5 +1,5 @@
 const { cacheService, CacheKeys, TTL } = require('../services/cacheService');
-const { createLogger } = require('../../../../shared/logger');
+const { createLogger } = require('../../shared/logger');
 
 const logger = createLogger('cache-middleware');
 

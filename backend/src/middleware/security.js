@@ -1,5 +1,5 @@
 const helmet = require('helmet');
-const { createLogger } = require('../../../../shared/logger');
+const { createLogger } = require('../../shared/logger');
 
 const logger = createLogger('security-middleware');
 
@@ -259,7 +259,6 @@ const requestSizeLimit = (options = {}) => {
   } = options;
   
   return (req, res, next) => {
-    logger.info('Request size limit middleware called');
     // Check content length
     const contentLength = parseInt(req.get('content-length') || '0');
     
@@ -297,7 +296,6 @@ const requestSizeLimit = (options = {}) => {
       });
     }
     
-    logger.info('Request size limit middleware passed');
     next();
   };
 };

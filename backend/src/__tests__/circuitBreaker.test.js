@@ -6,7 +6,7 @@ jest.mock('axios');
 const mockedAxios = axios;
 
 // Mock shared logger
-jest.mock('../../../../shared/logger', () => ({
+jest.mock('../../shared/logger', () => ({
   createLogger: jest.fn(() => ({
     info: jest.fn(),
     warn: jest.fn(),

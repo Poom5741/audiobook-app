@@ -14,7 +14,7 @@ const {
   createMetricsLogger,
   addRequestId,
   logUnhandledErrors
-} = require('../../../shared/logger');
+} = require('../shared/logger');
 const { connectDB } = require('./services/database');
 const { initializeQueue } = require('./services/queueService');
 
@@ -81,6 +81,8 @@ app.use(cors({
 app.use(compression());
 
 // Request parsing
+// Request parsing
+app.use(requestSizeLimit());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

@@ -1,5 +1,5 @@
 const { Pool } = require('pg');
-const { createLogger, createMetricsLogger } = require('../../../../shared/logger');
+const { createLogger, createMetricsLogger } = require('../../shared/logger');
 
 const logger = createLogger('database');
 const metricsLogger = createMetricsLogger('database');

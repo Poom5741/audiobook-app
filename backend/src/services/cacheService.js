@@ -1,5 +1,5 @@
 const Redis = require('ioredis');
-const { createLogger, createMetricsLogger } = require('../../../../shared/logger');
+const { createLogger, createMetricsLogger } = require('../../shared/logger');
 
 const logger = createLogger('cache-service');
 const metricsLogger = createMetricsLogger('cache-service');

@@ -1,6 +1,6 @@
 const CircuitBreaker = require('opossum');
 const axios = require('axios');
-const { createLogger, createMetricsLogger } = require('../../../../shared/logger');
+const { createLogger, createMetricsLogger } = require('../../shared/logger');
 
 const logger = createLogger('circuit-breaker');
 const metricsLogger = createMetricsLogger('circuit-breaker');

@@ -15,7 +15,8 @@ module.exports = {
   
   // Test patterns
   testMatch: [
-    '**/__tests__/**/*.(js|ts)',
+    '**/__tests__/**/*.test.(js|ts)',
+    '**/__tests__/**/*.spec.(js|ts)',
     '**/*.(test|spec).(js|ts)'
   ],
   
