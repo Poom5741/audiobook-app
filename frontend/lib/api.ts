@@ -162,8 +162,8 @@ export const booksApi = {
 export const searchApi = {
   async searchBooks(query: string, formats: string[] = ['epub', 'pdf']): Promise<SearchResult[]> {
     try {
-      const response = await axios.get('http://localhost:3002/api/search', {
-        params: { q: query, formats: formats.join(',') }
+      const response = await axios.get('http://localhost:3001/api/search', {
+        params: { q: query, format: formats.join(',') }
       });
       return response.data.results || [];
     } catch (error) {
