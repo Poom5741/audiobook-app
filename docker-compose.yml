@@ -63,7 +63,7 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - BOOKS_PATH=/books
-      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook_user:dev-password-123@postgres:5432/audiobook_db}
       - AUTO_DOWNLOAD_ENABLED=true
       - AUTO_DOWNLOAD_INTERVAL=3600000
       - AUTO_DOWNLOAD_MAX_PER_SESSION=3
@@ -88,7 +88,7 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - BOOKS_PATH=/books
-      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook:audiobook123@postgres:5432/audiobook_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://audiobook_user:dev-password-123@postgres:5432/audiobook_db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     volumes:
       - ./parser/src:/app/src
