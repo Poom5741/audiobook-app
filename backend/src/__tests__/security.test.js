@@ -1,5 +1,11 @@
 const request = require('supertest');
 const express = require('express');
+
+jest.mock('../middleware/security', () => ({
+  ...jest.requireActual('../middleware/security'),
+  securityLogger: jest.fn((req, res, next) => next()),
+}));
+
 const {
   securityHeaders,
   securityLogger,
@@ -9,6 +15,8 @@ const {
   validateSecurityHeaders,
   getSecurityConfig
 } = require('../middleware/security');
+
+
 
 describe('Security Middleware', () => {
   let app;
@@ -104,7 +112,7 @@ describe('Security Middleware', () => {
     test('should reject files exceeding size limit', () => {
       mockReq.headers['content-length'] = String(200 * 1024 * 1024); // 200MB
       mockReq.headers['content-type'] = 'multipart/form-data';
-      const middleware = requestSizeLimit({ maxFileSize: '100mb' });
+      const middleware = requestSizeLimit({ maxBodySize: '100mb' });
       middleware(mockReq, mockRes, next);
       expect(next).not.toHaveBeenCalled();
       expect(mockRes.status).toHaveBeenCalledWith(413);
@@ -200,7 +208,7 @@ describe('Security Middleware', () => {
         req.files = { file: mockFile };
         next();
       });
-      app.use(fileUploadSecurity());
+      app.use(fileUploadSecurity({ allowedTypes: ['application/pdf'] }));
       app.post('/upload', (req, res) => res.json({ status: 'ok' }));
 
       await request(app)
@@ -219,7 +227,7 @@ describe('Security Middleware', () => {
         req.files = { file: mockFile };
         next();
       });
-      app.use(fileUploadSecurity({ maxFileSize: 100 * 1024 * 1024 })); // 100MB limit
+      app.use(fileUploadSecurity({ maxFileSize: '100mb' })); // 100MB limit
       app.post('/upload', (req, res) => res.json({ status: 'ok' }));
 
       await request(app)

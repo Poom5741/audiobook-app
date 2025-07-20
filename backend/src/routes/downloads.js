@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
+const { callService } = require('../utils/circuitBreaker');
 const { logger } = require('../utils/logger');
 const { validateRequest } = require('../middleware/validation');
 const { body } = require('express-validator');
@@ -17,7 +17,9 @@ router.post('/search',
       
       const crawlerApiUrl = process.env.CRAWLER_API_URL || 'http://crawler:3001';
       
-      const response = await axios.get(`${crawlerApiUrl}/api/search`, {
+      const response = await callService('crawler', {
+        url: `${crawlerApiUrl}/api/search`,
+        method: 'GET',
         params: { q: query, limit },
         timeout: 30000
       });
@@ -54,10 +56,13 @@ router.post('/download',
       
       const crawlerApiUrl = process.env.CRAWLER_API_URL || 'http://crawler:3001';
       
-      const response = await axios.post(`${crawlerApiUrl}/api/download`, {
-        bookUrl,
-        priority
-      }, {
+      const response = await callService('crawler', {
+        url: `${crawlerApiUrl}/api/download`,
+        method: 'POST',
+        data: {
+          bookUrl,
+          priority
+        },
         timeout: 30000
       });
       
@@ -87,7 +92,9 @@ router.get('/queue/status', async (req, res) => {
   try {
     const crawlerApiUrl = process.env.CRAWLER_API_URL || 'http://crawler:3001';
     
-    const response = await axios.get(`${crawlerApiUrl}/api/queue/status`, {
+    const response = await callService('crawler', {
+      url: `${crawlerApiUrl}/api/queue/status`,
+      method: 'GET',
       timeout: 5000
     });
     
@@ -113,7 +120,9 @@ router.get('/queue/jobs', async (req, res) => {
     
     const crawlerApiUrl = process.env.CRAWLER_API_URL || 'http://crawler:3001';
     
-    const response = await axios.get(`${crawlerApiUrl}/api/queue/jobs`, {
+    const response = await callService('crawler', {
+      url: `${crawlerApiUrl}/api/queue/jobs`,
+      method: 'GET',
       params: { status, limit },
       timeout: 5000
     });

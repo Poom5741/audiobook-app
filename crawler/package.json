@@ -24,7 +24,8 @@
     "puppeteer": "^21.11.0",
     "sanitize-filename": "^1.6.3",
     "express-fileupload": "^1.4.3",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "shared": "file:../shared"
   },
   "devDependencies": {
     "jest": "^29.7.0",

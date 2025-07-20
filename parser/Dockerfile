@@ -12,11 +12,9 @@ RUN npm install --omit=dev && npm cache clean --force
 # Copy the rest of the parser application files
 COPY parser/ ./
 
-# Copy shared modules to /app/shared
-RUN mkdir -p ./shared
-COPY shared/ ./shared/
-# Install shared module dependencies
-WORKDIR ./shared
+# Copy shared modules
+COPY shared /shared
+WORKDIR /shared
 RUN npm install --production
 WORKDIR /app
 

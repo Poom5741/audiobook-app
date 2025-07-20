@@ -3,11 +3,46 @@ const router = express.Router();
 const { logger } = require('../utils/logger');
 const { getScraper } = require('../services/queueManager');
 
-// Search for books
-router.get('/', async (req, res) => {
-  const { q, limit = 10, language = 'en', format = '' } = req.query;
+// Search for books (POST)
+router.post('/', async (req, res) => {
+  const { query, limit = 10, language = 'en', format = '' } = req.body;
 
-  if (!q) {
+  if (!query) {
+    return res.status(400).json({ error: 'Body parameter "query" is required' });
+  }
+
+  try {
+    const scraper = getScraper();
+    if (!scraper) {
+      return res.status(503).json({ error: 'Scraper service not initialized' });
+    }
+
+    logger.info(`Searching for: ${query}`);
+    
+    const results = await scraper.search(query, {
+      limit: parseInt(limit),
+      language,
+      format
+    });
+
+    res.json({
+      query: query,
+      count: results.length,
+      results
+    });
+
+  } catch (error) {
+    logger.error('Search error:', error);
+    
+    res.status(500).json({ error: 'Search failed', message: error.message });
+  }
+});
+
+// Search for books (GET for convenience)
+router.get('/', async (req, res) => {
+  const { q: query, limit = 10, language = 'en', format = '' } = req.query;
+
+  if (!query) {
     return res.status(400).json({ error: 'Query parameter "q" is required' });
   }
 
@@ -17,16 +52,16 @@ router.get('/', async (req, res) => {
       return res.status(503).json({ error: 'Scraper service not initialized' });
     }
 
-    logger.info(`Searching for: ${q}`);
+    logger.info(`Searching for: ${query}`);
     
-    const results = await scraper.search(q, {
+    const results = await scraper.search(query, {
       limit: parseInt(limit),
       language,
       format
     });
 
     res.json({
-      query: q,
+      query: query,
       count: results.length,
       results
     });
@@ -34,33 +69,7 @@ router.get('/', async (req, res) => {
   } catch (error) {
     logger.error('Search error:', error);
     
-    // Temporary fallback: return mock data for testing
-    const mockResults = [
-      {
-        id: 'mock-1',
-        title: `Search Results for "${q}"`,
-        author: 'Demo Author',
-        year: '2024',
-        format: 'epub',
-        size: '2.5 MB',
-        url: 'https://example.com/book1.epub'
-      },
-      {
-        id: 'mock-2', 
-        title: `Another Book About "${q}"`,
-        author: 'Test Writer',
-        year: '2023',
-        format: 'pdf',
-        size: '4.1 MB',
-        url: 'https://example.com/book2.pdf'
-      }
-    ];
-    
-    res.json({
-      query: q,
-      count: mockResults.length,
-      results: mockResults
-    });
+    res.status(500).json({ error: 'Search failed', message: error.message });
   }
 });
 

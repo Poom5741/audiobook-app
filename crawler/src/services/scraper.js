@@ -4,21 +4,25 @@ const { logger } = require('../utils/logger');
 class Scraper {
   constructor() {
     this.browser = null;
-    this.baseUrl = 'https://annas-archive.org';
+    this.baseUrl = process.env.CRAWLER_BASE_URL || 'https://annas-archive.org';
   }
 
   async initialize() {
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch (e) {
+        logger.warn('Error closing existing browser instance:', e);
+      }
+    }
     try {
       this.browser = await puppeteer.launch({
         headless: 'new',
         args: [
           '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-          '--window-size=1920,1080'
-        ]
+          '--disable-setuid-sandbox'
+        ],
+        dumpio: true
       });
       logger.info('Browser initialized');
     } catch (error) {
@@ -27,8 +31,17 @@ class Scraper {
     }
   }
 
+  async ensureBrowser() {
+    if (!this.browser || !this.browser.isConnected()) {
+      logger.warn('Browser not connected or not initialized. Attempting to re-initialize.');
+      await this.initialize();
+    }
+  }
+
   async search(query, options = {}) {
     const { limit = 10, language = 'en', format = '' } = options;
+    
+    await this.ensureBrowser();
     const page = await this.browser.newPage();
     
     try {
@@ -38,15 +51,20 @@ class Scraper {
 
       // Navigate to search page
       const searchUrl = `${this.baseUrl}/search?q=${encodeURIComponent(query)}`;
-      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      try {
+        await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+      } catch (e) {
+        logger.error('Error navigating to page:', e);
+        throw e;
+      }
 
       // Wait for results
-      await page.waitForSelector('.js-scroll-trigger', { timeout: 10000 });
+      await page.waitForSelector('a[href*="/md5/"]', { timeout: 30000 });
 
       // Extract book data
       const books = await page.evaluate((limit) => {
         const results = [];
-        const items = document.querySelectorAll('.js-scroll-trigger');
+        const items = document.querySelectorAll('a[href*="/md5/"]');
         
         for (let i = 0; i < Math.min(items.length, limit); i++) {
           const item = items[i];
@@ -81,13 +99,14 @@ class Scraper {
   }
 
   async getBookDetails(bookUrl) {
+    await this.ensureBrowser();
     const page = await this.browser.newPage();
     
     try {
       await page.setViewport({ width: 1920, height: 1080 });
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
-      await page.goto(bookUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      await page.goto(bookUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
       // Extract book details and download links
       const bookDetails = await page.evaluate(() => {
@@ -154,20 +173,21 @@ class Scraper {
   }
 
   async getDirectDownloadLink(downloadPageUrl) {
+    await this.ensureBrowser();
     const page = await this.browser.newPage();
     
     try {
       await page.setViewport({ width: 1920, height: 1080 });
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
-      await page.goto(downloadPageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      await page.goto(downloadPageUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
       // Handle different download sources
       let directLink = null;
 
       // LibGen download
       if (downloadPageUrl.includes('libgen')) {
-        await page.waitForSelector('a[href*="get.php"]', { timeout: 5000 }).catch(() => {});
+        await page.waitForSelector('a[href*="get.php"]', { timeout: 5000 });
         directLink = await page.evaluate(() => {
           const link = document.querySelector('a[href*="get.php"]');
           return link ? link.href : null;

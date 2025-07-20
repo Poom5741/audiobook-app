@@ -17,7 +17,14 @@ async function initializeQueue() {
 
   // Create download queue
   downloadQueue = new Bull('download-queue', {
-    redis: process.env.REDIS_URL,
+    redis: {
+      port: 6379,
+      host: 'redis',
+      maxRetriesPerRequest: 3,
+      retryDelayOnFailover: 100,
+      enableReadyCheck: false,
+      lazyConnect: true
+    },
     defaultJobOptions: {
       attempts: 3,
       backoff: {
@@ -172,7 +179,7 @@ async function updateDownloadRecord(queueId, status, bookId = null, errorMessage
   }
 }
 
-async function getQueueStatus() {
+async function getQueueStats() {
   const [waiting, active, completed, failed] = await Promise.all([
     downloadQueue.getWaitingCount(),
     downloadQueue.getActiveCount(),
@@ -230,7 +237,7 @@ async function cleanupQueue() {
 module.exports = {
   initializeQueue,
   addToDownloadQueue,
-  getQueueStatus,
+  getQueueStats,
   getQueueJobs,
   cleanupQueue,
   getScraper: () => scraper,

@@ -10,6 +10,9 @@ const logger = createLogger('queue-service');
 const metricsLogger = createMetricsLogger('queue-service');
 
 let ttsQueue;
+let summarizationQueue;
+let parsingQueue;
+let downloadQueue;
 
 // Enhanced retry configurations for different job types
 const retryConfigs = {
@@ -85,6 +88,33 @@ async function initializeQueue() {
       maxStalledCount: 1, // Max number of times a job can stall before failing
       retryProcessDelay: 5000 // Delay before retrying failed job processing
     }
+  });
+
+  // Initialize Summarization queue
+  summarizationQueue = new Bull('summarization', {
+    redis: process.env.REDIS_URL,
+    defaultJobOptions: {
+      ...retryConfigs.summarization,
+      timeout: 120000, // 2 minutes
+    },
+  });
+
+  // Initialize Parsing queue
+  parsingQueue = new Bull('parsing', {
+    redis: process.env.REDIS_URL,
+    defaultJobOptions: {
+      ...retryConfigs.parsing,
+      timeout: 300000, // 5 minutes
+    },
+  });
+
+  // Initialize Download queue
+  downloadQueue = new Bull('download', {
+    redis: process.env.REDIS_URL,
+    defaultJobOptions: {
+      ...retryConfigs.download,
+      timeout: 900000, // 15 minutes
+    },
   });
 
   // Process TTS jobs
@@ -340,6 +370,144 @@ async function initializeQueue() {
   });
 
   logger.info('TTS queue initialized');
+
+  // Process Summarization jobs
+  summarizationQueue.process(async (job) => {
+    logger.info(`Processing summarization job: ${job.id}`);
+    // TODO: Implement actual summarization logic here
+    // Example: call external summarizer service
+    // const result = await callService('summarizer', { ... });
+    // return result;
+    return { status: 'summarized', jobId: job.id };
+  });
+  logger.info('Summarization queue initialized');
+
+  // Process Parsing jobs
+  parsingQueue.process(async (job) => {
+    logger.info(`Processing parsing job: ${job.id}`);
+    // TODO: Implement actual parsing logic here
+    // Example: call external parser service
+    // const result = await callService('parser', { ... });
+    // return result;
+    return { status: 'parsed', jobId: job.id };
+  });
+  logger.info('Parsing queue initialized');
+
+  // Process Download jobs
+  downloadQueue.process(async (job) => {
+    logger.info(`Processing download job: ${job.id}`);
+    // TODO: Implement actual download logic here
+    // Example: call external crawler service
+    // const result = await callService('crawler', { ... });
+    // return result;
+    return { status: 'downloaded', jobId: job.id };
+  });
+  logger.info('Download queue initialized');
+}
+
+const queues = {
+  'tts': ttsQueue,
+  'summarization': summarizationQueue,
+  'parsing': parsingQueue,
+  'download': downloadQueue,
+};
+
+function getQueue(queueName) {
+  const queue = queues[queueName];
+  if (!queue) {
+    throw new Error(`Queue '${queueName}' not found or not initialized`);
+  }
+  return queue;
+}
+
+async function getQueueStats(queueName) {
+  const queue = getQueue(queueName);
+  const [waiting, active, completed, failed] = await Promise.all([
+    queue.getWaitingCount(),
+    queue.getActiveCount(),
+    queue.getCompletedCount(),
+    queue.getFailedCount()
+  ]);
+
+  return {
+    waiting,
+    active,
+    completed,
+    failed,
+    total: waiting + active + completed + failed
+  };
+}
+
+async function getQueueJobs(queueName, status = 'active', limit = 20) {
+  const queue = getQueue(queueName);
+  let jobs;
+  
+  switch (status) {
+    case 'waiting':
+      jobs = await queue.getWaiting(0, limit);
+      break;
+    case 'active':
+      jobs = await queue.getActive(0, limit);
+      break;
+    case 'completed':
+      jobs = await queue.getCompleted(0, limit);
+      break;
+    case 'failed':
+      jobs = await queue.getFailed(0, limit);
+      break;
+    case 'all':
+      jobs = await queue.getJobs(['waiting', 'active', 'completed', 'failed'], 0, limit);
+      break;
+    default:
+      jobs = await queue.getJobs(['waiting', 'active'], 0, limit);
+  }
+
+  return jobs.map(job => ({
+    id: job.id,
+    data: job.data,
+    progress: job.progress(),
+    attemptsMade: job.attemptsMade,
+    failedReason: job.failedReason,
+    timestamp: job.timestamp,
+    processedOn: job.processedOn,
+    finishedOn: job.finishedOn,
+    delay: job.delay
+  }));
+}
+
+async function controlJob(queueName, jobId, action) {
+  const queue = getQueue(queueName);
+  const job = await queue.getJob(jobId);
+
+  if (!job) {
+    throw new Error('Job not found');
+  }
+
+  switch (action) {
+    case 'pause':
+      await job.pause();
+      logger.info(`Paused job ${jobId} in queue ${queueName}`);
+      break;
+    case 'resume':
+      await job.resume();
+      logger.info(`Resumed job ${jobId} in queue ${queueName}`);
+      break;
+    case 'retry':
+      await job.retry();
+      logger.info(`Retried job ${jobId} in queue ${queueName}`);
+      break;
+    case 'remove':
+      await job.remove();
+      logger.info(`Removed job ${jobId} from queue ${queueName}`);
+      // Reset chapter status if applicable for TTS jobs
+      if (queueName === 'tts' && job.data.chapterId) {
+        await updateChapterStatus(job.data.chapterId, 'parsed');
+      }
+      break;
+    default:
+      throw new Error(`Invalid action: ${action}`);
+  }
+  return true;
 }
 
 async function addTTSJob(jobData, priority = 0) {
@@ -357,109 +525,27 @@ async function addTTSJob(jobData, priority = 0) {
   return job;
 }
 
-async function getTTSQueueStats() {
-  if (!ttsQueue) {
-    throw new Error('TTS queue not initialized');
+async function cleanupAllQueues() {
+  for (const queueName in queues) {
+    const queue = queues[queueName];
+    if (queue) {
+      await queue.clean(24 * 60 * 60 * 1000); // 24 hours
+      await queue.clean(24 * 60 * 60 * 1000, 'failed');
+      logger.info(`Queue ${queueName} cleanup completed`);
+    }
   }
-
-  const [waiting, active, completed, failed] = await Promise.all([
-    ttsQueue.getWaitingCount(),
-    ttsQueue.getActiveCount(),
-    ttsQueue.getCompletedCount(),
-    ttsQueue.getFailedCount()
-  ]);
-
-  return {
-    waiting,
-    active,
-    completed,
-    failed,
-    total: waiting + active + completed + failed
-  };
-}
-
-async function getTTSJobs(status = 'active', limit = 20) {
-  if (!ttsQueue) {
-    throw new Error('TTS queue not initialized');
-  }
-
-  let jobs;
-  
-  switch (status) {
-    case 'waiting':
-      jobs = await ttsQueue.getWaiting(0, limit);
-      break;
-    case 'active':
-      jobs = await ttsQueue.getActive(0, limit);
-      break;
-    case 'completed':
-      jobs = await ttsQueue.getCompleted(0, limit);
-      break;
-    case 'failed':
-      jobs = await ttsQueue.getFailed(0, limit);
-      break;
-    default:
-      jobs = await ttsQueue.getJobs(['waiting', 'active'], 0, limit);
-  }
-
-  return jobs.map(job => ({
-    id: job.id,
-    data: job.data,
-    progress: job.progress(),
-    attemptsMade: job.attemptsMade,
-    failedReason: job.failedReason,
-    timestamp: job.timestamp,
-    processedOn: job.processedOn,
-    finishedOn: job.finishedOn,
-    delay: job.delay
-  }));
-}
-
-async function cancelTTSJob(jobId) {
-  if (!ttsQueue) {
-    throw new Error('TTS queue not initialized');
-  }
-
-  const job = await ttsQueue.getJob(jobId);
-  
-  if (!job) {
-    throw new Error('Job not found');
-  }
-
-  await job.remove();
-  
-  // Reset chapter status
-  if (job.data.chapterId) {
-    await updateChapterStatus(job.data.chapterId, 'parsed');
-  }
-
-  logger.info(`Cancelled TTS job: ${jobId}`);
-  return true;
-}
-
-async function cleanupQueue() {
-  if (!ttsQueue) {
-    return;
-  }
-
-  // Clean old completed and failed jobs
-  await ttsQueue.clean(24 * 60 * 60 * 1000); // 24 hours
-  await ttsQueue.clean(24 * 60 * 60 * 1000, 'failed');
-  
-  logger.info('TTS queue cleanup completed');
-}
-
-// Get queue instance (for route handlers)
-function getTTSQueue() {
-  return ttsQueue;
 }
 
 module.exports = {
   initializeQueue,
   addTTSJob,
-  getTTSQueueStats,
-  getTTSJobs,
-  cancelTTSJob,
-  cleanupQueue,
-  getTTSQueue
+  getQueueStats,
+  getQueueJobs,
+  controlJob,
+  cleanupAllQueues,
+  // Export specific queues for direct access if needed, but prefer generic functions
+  getTTSQueue: () => ttsQueue,
+  getSummarizationQueue: () => summarizationQueue,
+  getParsingQueue: () => parsingQueue,
+  getDownloadQueue: () => downloadQueue,
 };

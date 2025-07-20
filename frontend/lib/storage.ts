@@ -1,7 +1,8 @@
 // Local storage utilities for managing book progress
 
 export interface BookProgress {
-  bookSlug: string;
+  bookId: string;
+  bookSlug: string; // Keep for backward compatibility
   currentChapter: number;
   completedChapters: number[];
   lastPosition?: number;
@@ -83,6 +84,7 @@ export const progressStorage = {
     } else {
       // Create new progress entry
       this.saveProgress({
+        bookId: bookSlug, // Using bookSlug as bookId for backward compatibility
         bookSlug,
         currentChapter: chapterNumber,
         completedChapters: [],

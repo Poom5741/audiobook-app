@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { logger } = require('../utils/logger');
+const path = require('path');
+const fs = require('fs').promises;
 const { getScraper, addToDownloadQueue } = require('../services/queueManager');
 
 // In-memory pipeline status storage (in production, use Redis)

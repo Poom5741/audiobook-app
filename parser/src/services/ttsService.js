@@ -1,4 +1,4 @@
-const axios = require('axios');
+const { callService } = require('../utils/circuitBreaker');
 const fs = require('fs-extra');
 const path = require('path');
 const { createLogger } = require('../../shared/logger');
@@ -10,11 +10,14 @@ const TTS_API_URL = process.env.TTS_API_URL || 'http://tts-api:8000';
 async function convertTextToAudio(text, bookSlug, chapterNumber) {
   try {
     logger.info(`Converting text to audio for book: ${bookSlug}, chapter: ${chapterNumber}, text: ${text.substring(0, 50)}...`);
-    const response = await axios.post(`${TTS_API_URL}/tts`, {
-      text: text,
-      book: bookSlug,
-      chapter: chapterNumber.toString() // Ensure chapter is a string
-    }, {
+    const response = await callService('tts', {
+      method: 'POST',
+      url: `${TTS_API_URL}/tts`,
+      data: {
+        text: text,
+        book: bookSlug,
+        chapter: chapterNumber.toString() // Ensure chapter is a string
+      },
       responseType: 'json' // Expect JSON response from TTS API
     });
 

@@ -34,37 +34,8 @@ async function parsePDF(filePath) {
       }
     });
 
-    // Extract text with page information
-    const pages = [];
-    let currentPage = 1;
-    let pageText = '';
-    let pageStartIndex = 0;
-
-    // Split text by page (naive approach - PDF doesn't provide page boundaries)
-    const textLines = data.text.split('\n');
-    const approximateLinesPerPage = Math.ceil(textLines.length / data.numpages);
-
-    for (let i = 0; i < textLines.length; i++) {
-      pageText += textLines[i] + '\n';
-      
-      // Check if we should start a new page
-      if ((i + 1) % approximateLinesPerPage === 0 || i === textLines.length - 1) {
-        pages.push({
-          pageNumber: currentPage,
-          text: pageText.trim(),
-          startIndex: pageStartIndex,
-          endIndex: pageStartIndex + pageText.length
-        });
-        
-        pageStartIndex += pageText.length;
-        pageText = '';
-        currentPage++;
-      }
-    }
-
     return {
       text: data.text,
-      pages: pages,
       metadata: metadata,
       info: {
         numPages: data.numpages,

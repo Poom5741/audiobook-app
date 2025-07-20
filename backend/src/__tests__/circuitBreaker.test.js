@@ -1,4 +1,4 @@
-const { createCircuitBreaker, callService, healthCheck, getCircuitBreakerStats, serviceHelpers } = require('../utils/circuitBreaker');
+const { createCircuitBreaker, callService, healthCheck, getCircuitBreakerStats, serviceHelpers, resetAllCircuitBreakers } = require('../utils/circuitBreaker');
 const axios = require('axios');
 
 // Mock axios
@@ -23,11 +23,7 @@ jest.mock('../../shared/logger', () => ({
 describe('Circuit Breaker', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    // Reset circuit breakers
-    const CircuitBreaker = require('opossum');
-    if (CircuitBreaker.prototype.state) {
-      CircuitBreaker.prototype.state = 'CLOSED';
-    }
+    resetAllCircuitBreakers();
   });
 
   describe('createCircuitBreaker', () => {
@@ -125,7 +121,7 @@ describe('Circuit Breaker', () => {
 
       expect(result.service).toBe('auth');
       expect(result.status).toBe('unhealthy');
-      expect(result.error).toBe('Service unavailable');
+      expect(result.error).toBe('Breaker is open');
     });
   });
 

@@ -75,6 +75,35 @@ router.get('/',
   }
 );
 
+// POST /api/books - Create a new book
+router.post('/', 
+  validateUploadBook,
+  invalidateBookCache,
+  async (req, res) => {
+    try {
+      const { title, author, isbn, description, language, tags } = req.body;
+
+      const query = `
+        INSERT INTO books (title, author, isbn, description, language, tags, status)
+        VALUES ($1, $2, $3, $4, $5, $6, 'new')
+        RETURNING id, title, author, status, created_at
+      `;
+
+      const params = [title, author, isbn, description, language, tags];
+      const result = await pool.query(query, params);
+
+      res.status(201).json({
+        message: 'Book created successfully',
+        book: result.rows[0]
+      });
+
+    } catch (error) {
+      logger.error('Create book error:', error);
+      res.status(500).json({ error: 'Failed to create book' });
+    }
+  }
+);
+
 // GET /api/books/:id - Get book details
 router.get('/:id',
   validateRequest([
@@ -117,18 +146,66 @@ router.get('/:id',
       const chapterStats = chaptersResult.rows[0];
       
       res.json({
-        ...book,
-        stats: {
-          totalChapters: parseInt(chapterStats.total_chapters) || 0,
-          audioChapters: parseInt(chapterStats.audio_chapters) || 0,
-          processingChapters: parseInt(chapterStats.processing_chapters) || 0,
-          totalDuration: parseInt(chapterStats.total_duration) || 0
+        book: {
+          ...book,
+          stats: {
+            totalChapters: parseInt(chapterStats.total_chapters) || 0,
+            audioChapters: parseInt(chapterStats.audio_chapters) || 0,
+            processingChapters: parseInt(chapterStats.processing_chapters) || 0,
+            totalDuration: parseInt(chapterStats.total_duration) || 0
+          }
         }
       });
       
     } catch (error) {
       logger.error('Get book details error:', error);
       res.status(500).json({ error: 'Failed to fetch book details' });
+    }
+  }
+);
+
+// PUT /api/books/:id - Update book details
+router.put('/:id',
+  validateRequest([
+    param('id').isUUID()
+  ]),
+  validateUpdateBook,
+  invalidateBookCache,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { title, author, isbn, description, language, tags, status } = req.body;
+
+      const query = `
+        UPDATE books
+        SET 
+          title = COALESCE($1, title),
+          author = COALESCE($2, author),
+          isbn = COALESCE($3, isbn),
+          description = COALESCE($4, description),
+          language = COALESCE($5, language),
+          tags = COALESCE($6, tags),
+          status = COALESCE($7, status),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $8
+        RETURNING id, title, author, status, updated_at
+      `;
+
+      const params = [title, author, isbn, description, language, tags, status, id];
+      const result = await pool.query(query, params);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Book not found' });
+      }
+
+      res.json({
+        message: 'Book updated successfully',
+        book: result.rows[0]
+      });
+
+    } catch (error) {
+      logger.error('Update book error:', error);
+      res.status(500).json({ error: 'Failed to update book' });
     }
   }
 );

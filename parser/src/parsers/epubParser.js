@@ -61,8 +61,9 @@ function parseEPUB(filePath) {
               
               // Extract clean text
               const chapterText = $('body').text()
-                .replace(/\s+/g, ' ')
-                .replace(/\n{3,}/g, '\n\n')
+                .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width spaces
+                .replace(/\n\s*\n/g, '\n\n') // Replace multiple newlines with double newline
                 .trim();
 
               if (chapterText.length > 0) {

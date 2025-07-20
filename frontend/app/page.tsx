@@ -37,7 +37,9 @@ export default function HomePage() {
       const allProgress = progressStorage.getAllProgress();
       const progressMap: Record<string, BookProgress> = {};
       allProgress.forEach(p => {
-        progressMap[p.bookSlug] = p;
+        // Use bookId if available, fallback to bookSlug for backward compatibility
+        const key = p.bookId || p.bookSlug;
+        progressMap[key] = p;
       });
       setProgress(progressMap);
     } catch (err) {
@@ -49,8 +51,8 @@ export default function HomePage() {
     return new Date(dateString).toLocaleDateString();
   };
 
-  const getProgressPercentage = (bookSlug: string, totalChapters: number) => {
-    const bookProgress = progress[bookSlug];
+  const getProgressPercentage = (bookId: string, totalChapters: number) => {
+    const bookProgress = progress[bookId];
     if (!bookProgress) return 0;
     return Math.round((bookProgress.completedChapters.length / totalChapters) * 100);
   };
@@ -106,6 +108,11 @@ export default function HomePage() {
             <span>Add Book</span>
           </Button>
         </Link>
+        <Link href="/tts-queue">
+          <Button className="flex items-center space-x-2">
+            <span>TTS Queue</span>
+          </Button>
+        </Link>
       </div>
       
       {books.length === 0 ? (
@@ -118,7 +125,7 @@ export default function HomePage() {
                 Start building your audiobook library by adding your first book
               </p>
               <div className="space-y-2">
-                <Link href="/pipeline">
+                <Link href="/books/new">
                   <Button className="w-full">
                     <Plus className="h-4 w-4 mr-2" />
                     Create Audiobook
@@ -136,12 +143,17 @@ export default function HomePage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {books.map((book) => {
-            const bookProgress = progress[book.slug];
-            const progressPercent = getProgressPercentage(book.slug, book.total_chapters);
+          {books.filter(book => book.id).map((book) => {
+            const bookProgress = progress[book.id];
+            const progressPercent = getProgressPercentage(book.id, book.total_chapters);
+            
+            if (!book.id) {
+              console.error('Book missing ID:', book);
+              return null;
+            }
             
             return (
-              <Link key={book.id} href={`/book/${book.slug}`}>
+              <Link key={book.id} href={`/book/${book.id || 'ee369d94-0318-4092-9d55-eb601c953784'}`}>
                 <Card className="h-full hover:shadow-lg transition-all duration-200 hover:scale-[1.02] cursor-pointer group">
                   <CardHeader>
                     <CardTitle className="line-clamp-2 group-hover:text-primary transition-colors">
@@ -157,10 +169,10 @@ export default function HomePage() {
                         <BookOpen className="h-4 w-4" />
                         <span>{book.total_chapters} chapter{book.total_chapters !== 1 ? 's' : ''}</span>
                       </div>
-                      {book.total_duration && (
+                      {book.stats?.totalDuration && (
                         <div className="flex items-center space-x-1">
                           <Clock className="h-4 w-4" />
-                          <span>{Math.round(book.total_duration / 60)}m</span>
+                          <span>{Math.round(book.stats.totalDuration / 60)}m</span>
                         </div>
                       )}
                     </div>

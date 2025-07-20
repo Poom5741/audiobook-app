@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 import uuid
 from datetime import datetime
 import traceback
+import asyncio
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 import uvicorn
 from dotenv import load_dotenv
 
-from simple_tts_engine import SimpleTTSEngine
+from emotivoice_engine import EmotiVoiceEngine
 from simple_audio_utils import AudioProcessor
 from file_manager import FileManager
 
@@ -37,9 +38,10 @@ app = FastAPI(
 )
 
 # Global instances
-tts_engine: Optional[SimpleTTSEngine] = None
+tts_engine: Optional[EmotiVoiceEngine] = None
 audio_processor: Optional[AudioProcessor] = None
 file_manager: Optional[FileManager] = None
+tts_queue: Optional[asyncio.Queue] = None
 
 # Request/Response models
 class TTSRequest(BaseModel):
@@ -81,11 +83,16 @@ async def startup_event():
         
         file_manager = FileManager(audio_path)
         audio_processor = AudioProcessor()
-        tts_engine = SimpleTTSEngine()
+        tts_engine = EmotiVoiceEngine()
         
         # Initialize TTS engine
-        logger.info("Initializing SimpleTTS engine...")
-        await tts_engine.initialize()
+        logger.info("Initializing EmotiVoice engine...")
+        await tts_engine.load_models()
+
+        # Initialize queue and start worker
+        global tts_queue
+        tts_queue = asyncio.Queue()
+        asyncio.create_task(tts_worker())
         
         logger.info("SimpleTTS microservice started successfully")
         
@@ -121,8 +128,8 @@ async def health_check():
             pass
         
         # Get available speakers and emotions
-        speakers = tts_engine.get_available_speakers() if tts_engine else []
-        emotions = tts_engine.get_available_emotions() if tts_engine else []
+        speakers = ["default"] # espeak does not have distinct speakers
+        emotions = ["neutral"] # espeak does not have distinct emotions
         
         return HealthResponse(
             status="healthy",
@@ -143,94 +150,23 @@ async def health_check():
 @app.post("/tts", response_model=TTSResponse)
 async def generate_tts(request: TTSRequest, background_tasks: BackgroundTasks):
     start_time = datetime.now()
-    
+
     try:
-        logger.info(f"Starting TTS generation for book: {request.book}, chapter: {request.chapter}")
-        logger.info(f"Text length: {len(request.text)} characters")
-        logger.info(f"Speaker: {request.speaker}, Emotion: {request.emotion}, Speed: {request.speed}")
-        
-        # Validate request
-        if not tts_engine or not tts_engine.is_loaded:
-            raise HTTPException(status_code=503, detail="TTS engine not ready")
-        
-        # Prepare output path
-        audio_path = file_manager.get_chapter_path(request.book, request.chapter)
-        
-        # Ensure output directory exists
-        audio_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Generate audio
-        logger.info(f"Generating audio: {audio_path}")
-        
-        # Create temporary file for generation
-        temp_audio_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_audio_path = Path(temp_file.name)
-            
-            # Generate speech with EmotiVoice
-            await tts_engine.generate_speech(
-                text=request.text,
-                output_path=temp_audio_path,
-                speaker=request.speaker,
-                emotion=request.emotion,
-                speed=request.speed
-            )
-            
-            # Process and convert audio to MP3
-            final_audio_path = await audio_processor.process_audio(
-                input_path=temp_audio_path,
-                output_path=audio_path,
-                quality="standard"
-            )
-            
-            # Get file info
-            file_size = final_audio_path.stat().st_size
-            duration = await audio_processor.get_duration(final_audio_path)
-            
-            # Calculate processing time
-            processing_time = (datetime.now() - start_time).total_seconds()
-            
-            logger.info(f"TTS generation completed: {final_audio_path}")
-            logger.info(f"Duration: {duration}s, Size: {file_size} bytes, Time: {processing_time}s")
-            
-            # Clean up temp file in background
-            if temp_audio_path and temp_audio_path.exists():
-                background_tasks.add_task(cleanup_temp_file, temp_audio_path)
-            
-            # Return relative path for API consumption
-            relative_path = f"{request.book}/chapter-{request.chapter}.mp3"
-            
-            return TTSResponse(
-                success=True,
-                message="TTS generation completed successfully",
-                audio_path=relative_path,
-                duration=duration,
-                file_size=file_size,
-                processing_time=processing_time
-            )
-            
-        except Exception as e:
-            # Clean up temp file on error
-            if temp_audio_path and temp_audio_path.exists():
-                try:
-                    temp_audio_path.unlink()
-                except:
-                    pass
-            raise e
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"TTS generation failed: {e}")
-        logger.error(traceback.format_exc())
-        processing_time = (datetime.now() - start_time).total_seconds()
-        
+        logger.info(f"Queuing TTS generation for book: {request.book}, chapter: {request.chapter}")
+
+        if not tts_queue:
+            raise HTTPException(status_code=503, detail="TTS queue not ready")
+
+        await tts_queue.put(request)
+
         return TTSResponse(
-            success=False,
-            message=f"TTS generation failed: {str(e)}",
-            processing_time=processing_time
+            success=True,
+            message="TTS generation queued successfully",
         )
+
+    except Exception as e:
+        logger.error(f"Failed to queue TTS generation: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue TTS generation")
 
 # Get available speakers and emotions
 @app.get("/speakers")
@@ -298,6 +234,65 @@ async def delete_audio(book: str, chapter: str):
     except Exception as e:
         logger.error(f"Failed to delete audio: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete audio file")
+
+async def tts_worker():
+    while True:
+        try:
+            request = await tts_queue.get()
+            start_time = datetime.now()
+
+            logger.info(f"Processing TTS job for book: {request.book}, chapter: {request.chapter}")
+
+            # Prepare output path
+            audio_path = file_manager.get_chapter_path(request.book, request.chapter)
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Create temporary file for generation
+            temp_audio_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    temp_audio_path = Path(temp_file.name)
+
+                # Generate speech with EmotiVoice
+                await tts_engine.generate_speech(
+                    text=request.text,
+                    output_path=temp_audio_path,
+                    speaker=request.speaker,
+                    emotion=request.emotion,
+                    speed=request.speed
+                )
+
+                # Process and convert audio to MP3
+                final_audio_path = await audio_processor.process_audio(
+                    input_path=temp_audio_path,
+                    output_path=audio_path,
+                    quality="standard"
+                )
+
+                # Get file info
+                file_size = final_audio_path.stat().st_size
+                duration = await audio_processor.get_duration(final_audio_path)
+
+                # Calculate processing time
+                processing_time = (datetime.now() - start_time).total_seconds()
+
+                logger.info(f"TTS generation completed: {final_audio_path}")
+                logger.info(f"Duration: {duration}s, Size: {file_size} bytes, Time: {processing_time}s")
+
+            except Exception as e:
+                logger.error(f"TTS processing failed: {e}")
+            finally:
+                # Clean up temp file
+                if temp_audio_path and temp_audio_path.exists():
+                    try:
+                        temp_audio_path.unlink()
+                    except:
+                        pass
+
+            tts_queue.task_done()
+
+        except Exception as e:
+            logger.error(f"Error in TTS worker: {e}")
 
 # Cleanup function
 async def cleanup_temp_file(file_path: Path):

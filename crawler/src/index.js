@@ -9,7 +9,7 @@ const {
   createMetricsLogger,
   addRequestId,
   logUnhandledErrors
-} = require('../shared/logger');
+} = require('shared/logger');
 const { connectDB } = require('./db/connection');
 
 // Logger setup
@@ -50,8 +50,40 @@ app.use('/api/auto', autoRoutes);
 app.use('/api/pipeline', pipelineRoutes);
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'crawler' });
+app.get('/health', async (req, res) => {
+  let overallStatus = 'ok';
+  const healthDetails = {
+    service: 'crawler',
+    timestamp: new Date().toISOString(),
+    database: { status: 'unknown' },
+    queue: { status: 'unknown' },
+  };
+
+  // Check database connection
+  try {
+    const dbStatus = await connectDB(); // Assuming connectDB returns status or throws error
+    healthDetails.database = { status: 'connected' };
+  } catch (error) {
+    healthDetails.database = { status: 'disconnected', error: error.message };
+    overallStatus = 'degraded';
+  }
+
+  // Check queue status (assuming initializeQueue makes it available globally or returns an instance)
+  try {
+    // This is a placeholder. In a real scenario, you'd have a way to query queue health.
+    // For Bull, you might check active/waiting job counts or connection status.
+    const queueManager = require('./services/queueManager');
+    const queueStats = await queueManager.getQueueStats(); // Assuming this function exists
+    healthDetails.queue = { status: 'initialized', stats: queueStats };
+  } catch (error) {
+    healthDetails.queue = { status: 'uninitialized', error: error.message };
+    overallStatus = 'degraded';
+  }
+
+  res.status(overallStatus === 'ok' ? 200 : 503).json({
+    status: overallStatus,
+    ...healthDetails,
+  });
 });
 
 // Error handling

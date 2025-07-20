@@ -19,11 +19,23 @@ export interface Book {
   id: string;
   title: string;
   author: string;
-  slug: string;
+  isbn?: string;
+  description?: string;
+  language?: string;
+  tags?: string[];
   total_chapters: number;
   total_duration?: number;
   created_at: string;
   updated_at: string;
+  status?: string;
+  file_type?: string;
+  audio_chapters?: string;
+  stats?: {
+    totalChapters: number;
+    audioChapters: number;
+    processingChapters: number;
+    totalDuration: number;
+  };
 }
 
 export interface Chapter {
@@ -32,8 +44,13 @@ export interface Chapter {
   chapter_number: number;
   title: string;
   duration?: number;
-  audio_available: boolean;
+  status: string;
+  audio_path?: string;
   text_length?: number;
+  hasAudio?: boolean;
+  audioUrl?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AudioInfo {
@@ -101,7 +118,8 @@ export const booksApi = {
   async getBooks(): Promise<Book[]> {
     try {
       const response = await api.get('/books');
-      return response.data.books || [];
+      const books = response.data.books || [];
+      return books;
     } catch (error) {
       console.error('Failed to fetch books:', error);
       return [];
@@ -109,23 +127,23 @@ export const booksApi = {
   },
 
   // Get book details
-  async getBook(slug: string): Promise<Book | null> {
+  async getBook(id: string): Promise<Book | null> {
     try {
-      const response = await api.get(`/books/${slug}`);
+      const response = await api.get(`/books/${id}`);
       return response.data.book || null;
     } catch (error) {
-      console.error(`Failed to fetch book ${slug}:`, error);
+      console.error(`Failed to fetch book ${id}:`, error);
       return null;
     }
   },
 
   // Get book chapters
-  async getChapters(slug: string): Promise<Chapter[]> {
+  async getChapters(id: string): Promise<Chapter[]> {
     try {
-      const response = await api.get(`/books/${slug}/chapters`);
+      const response = await api.get(`/books/${id}/chapters`);
       return response.data.chapters || [];
     } catch (error) {
-      console.error(`Failed to fetch chapters for ${slug}:`, error);
+      console.error(`Failed to fetch chapters for ${id}:`, error);
       return [];
     }
   },
@@ -154,6 +172,61 @@ export const booksApi = {
     } catch (error) {
       console.error(`Failed to generate audio for ${slug}/${chapter}:`, error);
       return false;
+    }
+  },
+
+  // Delete a book
+  async deleteBook(id: string): Promise<boolean> {
+    try {
+      await api.delete(`/books/${id}`);
+      return true;
+    } catch (error) {
+      console.error(`Failed to delete book ${id}:`, error);
+      return false;
+    }
+  },
+
+  // Create a new book
+  async createBook(bookData: { title: string; author: string; isbn?: string; description?: string; language?: string; tags?: string[] }): Promise<Book | null> {
+    try {
+      const response = await api.post('/books', bookData);
+      return response.data.book || null;
+    } catch (error) {
+      console.error('Failed to create book:', error);
+      return null;
+    }
+  },
+
+  // Update a book
+  async updateBook(id: string, bookData: { title?: string; author?: string; isbn?: string; description?: string; language?: string; tags?: string[] }): Promise<Book | null> {
+    try {
+      const response = await api.put(`/books/${id}`, bookData);
+      return response.data.book || null;
+    } catch (error) {
+      console.error(`Failed to update book ${id}:`, error);
+      return null;
+    }
+  },
+
+  // Get TTS queue status
+  async getTTSQueueStatus(): Promise<{ pending: number; processing: number; completed: number; failed: number; waiting: number; active: number; total: number }> {
+    try {
+      const response = await api.get('/tts-queue/status');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get TTS queue status:', error);
+      return { pending: 0, processing: 0, completed: 0, failed: 0, waiting: 0, active: 0, total: 0 };
+    }
+  },
+
+  // Get TTS queue jobs
+  async getTTSQueueJobs(status?: string): Promise<any[]> {
+    try {
+      const response = await api.get('/tts-queue/jobs', { params: { status } });
+      return response.data.jobs || [];
+    } catch (error) {
+      console.error('Failed to get TTS queue jobs:', error);
+      return [];
     }
   },
 };

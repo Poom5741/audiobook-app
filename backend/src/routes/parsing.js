@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
+const { callService } = require('../utils/circuitBreaker');
 const { logger } = require('../utils/logger');
 const { validateRequest } = require('../middleware/validation');
 const { body, param } = require('express-validator');
@@ -26,14 +26,17 @@ router.post('/upload', async (req, res) => {
     const parserApiUrl = process.env.PARSER_API_URL || 'http://parser:3002';
 
     // Forward the file to the parser service
-    const parseResponse = await axios.post(`${parserApiUrl}/api/parse/file`, {
-      filePath: tempFilePath,
-      options: {
-        summarize: summarize === 'true',
-        summaryStyle,
-        saveToDb: true
-      }
-    }, {
+    const parseResponse = await callService('parser', {
+      url: `${parserApiUrl}/api/parse/file`,
+      method: 'POST',
+      data: {
+        filePath: tempFilePath,
+        options: {
+          summarize: summarize === 'true',
+          summaryStyle,
+          saveToDb: true
+        }
+      },
       timeout: 300000 // 5 minutes
     });
 
@@ -95,14 +98,17 @@ router.post('/book/:bookId',
       const book = bookResult.rows[0];
       
       // Call parser service
-      const parseResponse = await axios.post(`${parserApiUrl}/api/parse/file`, {
-        filePath: book.file_path,
-        options: {
-          chunkSize,
-          splitBy,
-          saveToDb: true
-        }
-      }, {
+      const parseResponse = await callService('parser', {
+        url: `${parserApiUrl}/api/parse/file`,
+        method: 'POST',
+        data: {
+          filePath: book.file_path,
+          options: {
+            chunkSize,
+            splitBy,
+            saveToDb: true
+          }
+        },
         timeout: 300000 // 5 minutes
       });
       
@@ -138,7 +144,9 @@ router.get('/stats', async (req, res) => {
   try {
     const parserApiUrl = process.env.PARSER_API_URL || 'http://parser:3002';
     
-    const response = await axios.get(`${parserApiUrl}/api/stats`, {
+    const response = await callService('parser', {
+      url: `${parserApiUrl}/api/stats`,
+      method: 'GET',
       timeout: 5000
     });
     

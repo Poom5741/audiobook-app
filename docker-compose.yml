@@ -37,6 +37,9 @@ services:
       - BOOKS_PATH=/books
       - AUDIO_PATH=/audio
       - TTS_API_URL=http://tts-api:8000
+      - TTS_SERVICE_URL=http://tts-api:8000
+      - PARSER_SERVICE_URL=http://parser:3002
+      - CRAWLER_SERVICE_URL=http://crawler:3001
     volumes:
       - ./backend:/app
       - /app/node_modules
@@ -46,9 +49,9 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       tts-api:
-        condition: service_started
+        condition: service_healthy
     networks:
       - audiobook-network
 
@@ -115,7 +118,7 @@ services:
       - AUDIO_PATH=/audio
     volumes:
       - ./tts-api:/app
-      - ./audio:/audio
+      - audio_volume:/audio
       - tts_models:/root/.cache
     networks:
       - audiobook-network
@@ -123,6 +126,11 @@ services:
       resources:
         limits:
           memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # PostgreSQL Database
   postgres:
@@ -155,6 +163,11 @@ services:
       - redis_data:/data
     networks:
       - audiobook-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
 
   # Nginx Reverse Proxy
   nginx:

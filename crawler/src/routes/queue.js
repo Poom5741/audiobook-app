@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { logger } = require('../utils/logger');
-const { getQueueStatus, getQueueJobs, cleanupQueue } = require('../services/queueManager');
+const { getQueueStats, getQueueJobs, cleanupQueue } = require('../services/queueManager');
 const { pool } = require('../db/connection');
 
 // Get queue status
 router.get('/status', async (req, res) => {
   try {
-    const status = await getQueueStatus();
+    const status = await getQueueStats();
     res.json(status);
   } catch (error) {
     logger.error('Queue status error:', error);

@@ -33,8 +33,26 @@ router.post('/queue', async (req, res) => {
       }
     }
 
+    // Get direct download link
+    let directDownloadUrl = bookUrl;
+    if (bookDetails.downloadLinks && bookDetails.downloadLinks.length > 0) {
+      const scraper = getScraper(); // Re-get scraper to ensure it's initialized
+      if (scraper) {
+        // Prioritize certain sources or just take the first available
+        const preferredLink = bookDetails.downloadLinks.find(link => link.source === 'libgen') || bookDetails.downloadLinks[0];
+        if (preferredLink) {
+          logger.info(`Attempting to get direct download link from: ${preferredLink.url}`);
+          directDownloadUrl = await scraper.getDirectDownloadLink(preferredLink.url);
+          if (!directDownloadUrl) {
+            logger.warn(`Failed to get direct download link for ${preferredLink.url}, falling back to original URL.`);
+            directDownloadUrl = bookUrl; // Fallback to original if direct link not found
+          }
+        }
+      }
+    }
+
     // Add to download queue
-    const result = await addToDownloadQueue(bookUrl, bookDetails, priority);
+    const result = await addToDownloadQueue(directDownloadUrl, bookDetails, priority);
 
     res.json({
       status: 'success',

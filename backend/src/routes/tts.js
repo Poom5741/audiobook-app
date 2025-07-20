@@ -7,7 +7,7 @@ const { cacheTTSQueue, invalidateBookCache, cacheMiddleware } = require('../midd
 const { TTL } = require('../services/cacheService');
 const { param, body } = require('express-validator');
 const { addTTSJob, getTTSQueue } = require('../services/queueService');
-const { serviceHelpers } = require('../utils/circuitBreaker');
+const { callService, serviceHelpers } = require('../utils/circuitBreaker');
 
 const logger = createLogger('tts-routes');
 
@@ -446,12 +446,15 @@ router.post('/summarize',
       
       const summarizerApiUrl = process.env.SUMMARIZER_API_URL || 'http://localhost:8001';
       
-      const response = await axios.post(`${summarizerApiUrl}/api/summarize`, {
-        text,
-        style,
-        maxLength,
-        contentType
-      }, {
+      const response = await callService('summarizer', {
+        url: `${summarizerApiUrl}/api/summarize`,
+        method: 'POST',
+        data: {
+          text,
+          style,
+          maxLength,
+          contentType
+        },
         timeout: 60000
       });
       
@@ -488,7 +491,9 @@ router.get('/summarize/health', async (req, res) => {
   try {
     const summarizerApiUrl = process.env.SUMMARIZER_API_URL || 'http://localhost:8001';
     
-    const response = await axios.get(`${summarizerApiUrl}/api/summarize/health`, {
+    const response = await callService('summarizer', {
+      url: `${summarizerApiUrl}/api/summarize/health`,
+      method: 'GET',
       timeout: 5000
     });
     

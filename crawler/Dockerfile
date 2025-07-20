@@ -2,15 +2,7 @@
 FROM node:20-alpine AS base
 
 # Install Chrome dependencies for Alpine
-RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
-    && rm -rf /var/cache/apk/*
+RUN apk add --no-cache     chromium     nss     freetype     freetype-dev     harfbuzz     ca-certificates     ttf-freefont     curl     && rm -rf /var/cache/apk/*
 
 # Set Puppeteer to use installed Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
@@ -29,11 +21,9 @@ WORKDIR /app
 # Copy dependencies
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy shared modules to /app/shared
-RUN mkdir -p ./shared
-COPY shared/ ./shared/
-# Install shared module dependencies
-WORKDIR ./shared
+# Copy shared modules
+COPY shared /shared
+WORKDIR /shared
 RUN npm install --production
 WORKDIR /app
 

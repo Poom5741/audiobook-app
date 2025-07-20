@@ -153,6 +153,12 @@ const joiSchemas = {
     language: Joi.string().valid('en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko').optional(),
     status: Joi.string().valid('pending', 'processing', 'ready', 'failed').optional()
   }),
+
+  chapter: Joi.object({
+    title: Joi.string().min(1).max(200).required(),
+    chapter_number: Joi.number().integer().min(1).required(),
+    content: Joi.string().min(1).required(),
+  }),
   
   // TTS generation schemas
   generateTTS: Joi.object({
@@ -344,6 +350,11 @@ module.exports = {
   validateUploadBookZod,
   validateGenerateTTSZod,
   validateSearchBooksZod,
+
+  // Task 2.1 specific exports
+  validateBook: validateJoi(joiSchemas.uploadBook),
+  validateChapter: validateJoi(joiSchemas.chapter),
+  validateTTS: validateJoi(joiSchemas.generateTTS),
   
   // Utility functions
   formatValidationError
