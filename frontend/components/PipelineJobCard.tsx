@@ -142,9 +142,28 @@ export default function PipelineJobCard({ job }: PipelineJobCardProps) {
         {/* Detailed Steps */}
         <div className="space-y-3">
           {pipelineSteps.map((step, index) => {
-            const stepStatus = job.steps?.find(s => s.name.toLowerCase().includes(step.key))?.status || 'pending';
-            const stepProgress = job.steps?.find(s => s.name.toLowerCase().includes(step.key))?.progress || 0;
-            const stepMessage = job.steps?.find(s => s.name.toLowerCase().includes(step.key))?.message;
+            // Handle both array and object formats for steps
+            let stepStatus = 'pending';
+            let stepProgress = 0;
+            let stepMessage = '';
+            
+            if (job.steps) {
+              if (Array.isArray(job.steps)) {
+                // Steps is an array (as per TypeScript interface)
+                const stepData = job.steps.find(s => s.name.toLowerCase().includes(step.key));
+                stepStatus = stepData?.status || 'pending';
+                stepProgress = stepData?.progress || 0;
+                stepMessage = stepData?.message || '';
+              } else {
+                // Steps is an object (as per backend implementation)
+                const stepData = (job.steps as any)[step.key];
+                if (stepData) {
+                  stepStatus = stepData.status || 'pending';
+                  stepProgress = stepData.progress || 0;
+                  stepMessage = stepData.message || '';
+                }
+              }
+            }
             const Icon = step.icon;
             
             // Determine if this step should be shown as active
